@@ -1,0 +1,17 @@
+default:
+  num_villagers: 3
+  num_werewolves: 2
+  has_seer: true
+  max_days: 10
+
+large_game:
+  num_villagers: 5
+  num_werewolves: 2
+  has_seer: true
+  max_days: 10
+
+no_seer:
+  num_villagers: 4
+  num_werewolves: 2
+  has_seer: false
+  max_days: 10 

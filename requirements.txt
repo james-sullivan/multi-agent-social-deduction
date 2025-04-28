@@ -1,0 +1,5 @@
+langchain>=0.1.0
+langchain-anthropic>=0.1.1
+anthropic>=0.14.0
+python-dotenv>=1.0.0
+pyyaml>=6.0 
