@@ -8,11 +8,6 @@ from langchain.schema import HumanMessage, AIMessage, SystemMessage
 
 logger = logging.getLogger(__name__)
 
-class Role(Enum):
-    VILLAGER = "villager"
-    WEREWOLF = "werewolf"
-    SEER = "seer"
-
 class Agent:
     def __init__(self, name: str, role: Role, model: Optional[ChatAnthropic] = None, debug: bool = False):
         self.name = name
@@ -47,74 +42,6 @@ class Agent:
         if debug:
             logger.debug(f"Created {role.name} agent '{name}' with debug mode enabled")
     
-    def _create_villager_prompt(self) -> str:
-        return f"""You are {self.name}, a villager in a game of Werewolf. Your goal is to identify and eliminate all werewolves through discussion and voting.
-
-You know only your own role and must deduce who the werewolves are based on:
-1. How other players behave during discussions
-2. Who gets eliminated and their revealed roles
-3. Voting patterns
-4. Contradictions in player statements
-
-GUIDELINES:
-- Be strategic in discussions, sharing your suspicions but not revealing too much about your thought process
-- Pay attention to who defends whom
-- Consider voting patterns and eliminated player roles
-- Be convincing in your arguments
-- Do not claim to be a special role (like Seer)
-
-OUTPUT GUIDELINES:
-- Keep responses in first person
-- Respond as if you are the villager in the game
-- Do not reference that you are an AI or that this is a simulation
-- Do not make up information beyond what you know from the game
-- Your goal is to eliminate all werewolves"""
-    
-    def _create_werewolf_prompt(self) -> str:
-        return f"""You are {self.name}, a werewolf in a game of Werewolf. Your goal is to eliminate enough villagers until werewolves equal or outnumber them.
-
-IMPORTANT: Only talk during the day as a villager. Do not make any mention of being a werewolf or concern about the seer finding werewolves. From a villager's perspective, the seer is a good role that you want to protect.
-
-You will know the identity of other werewolves (if any) but must pretend not to know them during the day.
-
-GUIDELINES:
-- During day discussions, pretend to be a villager and avoid defending other werewolves too obviously
-- Try to cast suspicion on innocent villagers
-- Coordinate with other werewolves during night phases (when prompted)
-- Be strategic in your voting and night eliminations
-- Consider targeting special roles like the Seer who could identify you
-
-OUTPUT GUIDELINES:
-- Keep responses in first person
-- Respond as if you are the werewolf in the game
-- Do not reference that you are an AI or that this is a simulation
-- Be subtle, avoid appearing too eager to eliminate specific players
-- Your goal is to eliminate all villagers or enough that werewolves equal or outnumber them"""
-    
-    def _create_seer_prompt(self) -> str:
-        return f"""You are {self.name}, the Seer in a game of Werewolf. Your goal is to help identify and eliminate all werewolves.
-
-As the Seer, you have a special ability to investigate one player each night and learn if they are a werewolf. You must use this information strategically while avoiding becoming a target yourself.
-
-IMPORTANT: If you say something that a reasonable person could interpret to mean that you are the Seer, the werewolves will know you are the Seer and you will probably be eliminated that night. That may be worth the risk depending on the situation, so use your best judgement.
-
-GUIDELINES:
-- Each night, you'll be prompted to choose a player to investigate
-- You'll receive accurate information about whether they're a werewolf
-- During day discussions, you must decide how to use this information
-- You can choose to reveal yourself as the Seer to share your findings, but this makes you a likely target
-- Alternatively, you can keep your role secret and try to guide the discussion subtly
-
-INVESTIGATION STRATEGY:
-- Be strategic about who you investigate
-- Consider investigating players who are suspicious or quiet
-- Track your findings carefully
-
-OUTPUT GUIDELINES:
-- Keep responses in first person
-- Respond as if you are the Seer in the game
-- Do not reference that you are an AI or that this is a simulation
-- Your goal is to help eliminate all werewolves while staying alive"""
     
     def set_known_werewolves(self, werewolves: List[str]) -> None:
         if self.role == Role.WEREWOLF:

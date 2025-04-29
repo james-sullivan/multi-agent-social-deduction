@@ -3,63 +3,22 @@ from typing import Dict, List, Optional, Tuple, Any
 import random
 import logging
 
-from agent import Agent, Role
+from src.agent_old import Agent, Role
 
 logger = logging.getLogger(__name__)
 
-class Phase(Enum):
-    NIGHT = "night"
-    DAY = "day"
+class Vote(Enum):
+    YES = "Yes"
+    NO = "No"
+    CANT_VOTE = "Cant_Vote"
 
-class GameState:
-    def __init__(self, players: Dict[str, Agent]):
-        self.players = players
-        self.alive_players = list(players.keys())
-        self.phase = Phase.DAY
-        self.day_count = 0
-        self.night_count = 0
-        self.eliminations: List[str] = []
-        self.history: List[str] = []
-        self.game_over = False
-        self.winner: Optional[str] = None
-        
-    def get_alive_players(self) -> List[str]:
-        return self.alive_players
-    
-    def get_alive_werewolves(self) -> List[str]:
-        return [name for name in self.alive_players 
-                if self.players[name].role == Role.WEREWOLF]
-    
-    def get_alive_villagers(self) -> List[str]:
-        return [name for name in self.alive_players 
-                if self.players[name].role != Role.WEREWOLF]
-    
-    def eliminate_player(self, player_name: str) -> None:
-        if player_name in self.alive_players:
-            self.alive_players.remove(player_name)
-            self.eliminations.append(player_name)
-            role = self.players[player_name].role
-            logger.info(f"{player_name} ({role.name}) has been eliminated")
-            
-    def check_win_condition(self) -> bool:
-        werewolves = self.get_alive_werewolves()
-        villagers = self.get_alive_villagers()
-        
-        if not werewolves:
-            self.game_over = True
-            self.winner = "Villagers"
-            return True
-        
-        if len(werewolves) >= len(villagers):
-            self.game_over = True
-            self.winner = "Werewolves"
-            return True
-            
-        return False
-    
-    def record_event(self, event: str) -> None:
-        self.history.append(event)
-        logger.info(event)
+class Alignment(Enum):
+    GOOD = "Good"
+    EVIL = "Evil"
+
+class Phase(Enum):
+    NIGHT = "Night"
+    DAY = "Day"
 
 class Game:
     def __init__(self, players: Dict[str, Agent]):
