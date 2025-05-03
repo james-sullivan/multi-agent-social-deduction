@@ -60,7 +60,7 @@ class Player:
         self.name: str = name
         self.alive: bool = True
         self.history: list[str] = []
-        self.notes: str = ""
+        self.notes: str = "No notes so far."
         self.alignment: Alignment = alignment
         self.character: Optional[Character] = character
         self.used_once_per_game: dict[DayActions, bool] = {action: False for action in ONCE_PER_GAME_ACTIONS}
@@ -75,10 +75,18 @@ class Player:
     def give_info(self, info: str) -> None:
         self.history.append(info)
 
-    def vote(self, 
-             public_game_state: dict, 
+    def vote(self,
+             client: Anthropic,
+             nominee: str,
+             public_player_state: dict,
+             current_tally: int,
+             required_votes: int,
              previous_votes: list[tuple[str, Vote]], 
              bulter_player_choice: str | None = None) -> Vote:
+        
+        if not self.alive and self.used_dead_vote:
+            return Vote.CANT_VOTE
+
         # The butler cannot vote if the player they chose didn't vote yes
         if bulter_player_choice:
             found_player = False
@@ -92,8 +100,52 @@ class Player:
                     break
             if not found_player:
                 return Vote.NO
+            
+        # Get the player's vote based on the game state and previous votes
+        system_prompt = self._get_player_system_prompt(public_player_state)
+        
+        if nominee == self.name:
+            nominee_context = "You are the nominee for execution. "
+        else:
+            nominee_context = f"The nominee for execution is {nominee}. "
 
-        return Vote.YES
+        required_votes_context = f"{required_votes} votes are required to execute the nominee."
+
+        # Format previous votes for context
+        votes_context = "Previous votes in this nomination:\n"
+        for voter_name, vote in previous_votes:
+            votes_context += f"- {voter_name}: {vote.name}\n"
+        
+        message = client.messages.create(
+            model="claude-3-5-haiku-20240307",
+            max_tokens=100,
+            system=system_prompt,
+            messages=[
+                {
+                    "role": "user",
+                    "content": f"""
+You need to vote on the current nomination.
+{nominee_context}
+{current_tally} have been cast so far.
+{required_votes_context}
+{votes_context}
+
+Should you vote YES or NO on this nomination? Consider the game state, your character's abilities, and the previous votes.
+Respond with only 'YES' or 'NO'.
+"""
+                }
+            ]
+        )
+        
+        response = message.content[0].text.strip().upper()
+            
+        # Return the appropriate vote
+        if response == "YES":
+            if not self.alive:
+                self.used_dead_vote = True
+            return Vote.YES
+        else:
+            return Vote.NO
     
     def _get_player_system_prompt(self, public_player_state: list[dict]) -> str:
         if self.character:
@@ -112,7 +164,11 @@ class Player:
             f"You have {"not" if self.used_nomination else ""} nominated today. " + \
             f"You have {self.messages_left} messages left that you can send today. " + "\n" + \
             game_state + "\n" + \
-            seating_explanation
+            seating_explanation + "\n" + \
+            "Here are your notes summarizing the game state:" + "\n" + \
+            self.notes + "\n" + \
+            "Here's a complete history of the current day:" + "\n" + \
+            "\n".join(self.history)
 
         return system_prompt
     

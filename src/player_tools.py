@@ -3,7 +3,7 @@ from anthropic.types import ToolParam
 # Message tool for players to send messages to others
 MESSAGE_TOOL = ToolParam(
     name="send_message",
-    description="Send a message to one or more players. You have a limited number of messages you can send per day. Send a message to everyone if you want to talk publicly or send a message to only one or a few players if you want to talk privately.",
+    description="Send a message to one or more players. The message should be no more than 4 sentences. You have a limited number of messages you can send per day. Send a message to everyone if you want to talk publicly or send a message to only one or a few players if you want to talk privately.",
     input_schema={
         "type": "object",
         "properties": {
@@ -26,13 +26,13 @@ MESSAGE_TOOL = ToolParam(
 # Slayer tool for using the one-time special ability
 SLAYER_TOOL = ToolParam(
     name="slayer_power",
-    description="Pick a player, if they are a Demon they will die. This power can only be used once per game and it will only succeed if the player using it is the Slayer. Use this when you believe you've identified an evil player and want to eliminate them.",
+    description="Pick a player, if they are a Demon they will die. This power can only be used once per game.",
     input_schema={
         "type": "object",
         "properties": {
             "target": {
                 "type": "string",
-                "description": "The name of the player to use the slayer power on."
+                "description": "The name of the player to use the slayer power on. If you want to use the power on Jace, you would put 'Jace' here."
             }
         },
         "required": ["target"]
@@ -48,7 +48,7 @@ NOMINATION_TOOL = ToolParam(
         "properties": {
             "player": {
                 "type": "string",
-                "description": "The player to nominate for execution."
+                "description": "The player to nominate for execution. If you want to nominate Susan, you would put 'Susan' here."
             },
             "reason": {
                 "type": "string",
