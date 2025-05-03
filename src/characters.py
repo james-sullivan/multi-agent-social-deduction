@@ -1,4 +1,4 @@
-from src.roles import Townsfolk, Outsider, Minion, Demon, Role
+from roles import Townsfolk, Outsider, Minion, Demon, Role
 from enum import Enum
 import random
 from game import Alignment
@@ -29,114 +29,120 @@ class Character(Enum):
 
 ### Townsfolk ###
 class Washerwoman(Townsfolk):
-    def get_character(self) -> Character:
-        return Character.WASHERWOMAN    
+    def __init__(self, name: str):
+        super().__init__(name, Character.WASHERWOMAN)
 
 class Librarian(Townsfolk):
-    def get_character(self) -> Character:
-        return Character.LIBRARIAN
+    def __init__(self, name: str):
+        super().__init__(name, Character.LIBRARIAN)
 
 class Investigator(Townsfolk):
-    def get_character(self) -> Character:
-        return Character.INVESTIGATOR
+    def __init__(self, name: str):
+        super().__init__(name, Character.INVESTIGATOR)
 
 class Chef(Townsfolk):
-    def get_character(self) -> Character:
-        return Character.CHEF
+    def __init__(self, name: str):
+        super().__init__(name, Character.CHEF)
 
 class Empath(Townsfolk):
-    def get_character(self) -> Character:
-        return Character.EMPATH
+    def __init__(self, name: str):
+        super().__init__(name, Character.EMPATH)
 
 class FortuneTeller(Townsfolk):
-    def get_character(self) -> Character:
-        return Character.FORTUNETELLER
+    def __init__(self, name: str):
+        super().__init__(name, Character.FORTUNETELLER)
 
 class Undertaker(Townsfolk):
-    def get_character(self) -> Character:
-        return Character.UNDERTAKER
-
+    def __init__(self, name: str):
+        super().__init__(name, Character.UNDERTAKER)
 
 class Monk(Townsfolk):
-    def get_character(self) -> Character:
-        return Character.MONK
+    def __init__(self, name: str):
+        super().__init__(name, Character.MONK)
 
 class Ravenkeeper(Townsfolk):
-    def get_character(self) -> Character:
-        return Character.RAVENKEEPER
+    def __init__(self, name: str):
+        super().__init__(name, Character.RAVENKEEPER)
     
     def use_ravenkeeper_ability(self, public_game_state: dict) -> None:
         pass
 
 class Virgin(Townsfolk):
-    def get_character(self) -> Character:
-        return Character.VIRGIN
+    def __init__(self, name: str):
+        super().__init__(name, Character.VIRGIN)
 
 class Slayer(Townsfolk):
-    def get_character(self) -> Character:
-        return Character.SLAYER
+    def __init__(self, name: str):
+        super().__init__(name, Character.SLAYER)
     
     def use_slayer_ability(self, public_game_state: dict) -> None:
         pass
 
 class Soldier(Townsfolk):
-    def get_character(self) -> Character:
-        return Character.SOLDIER
+    def __init__(self, name: str):
+        super().__init__(name, Character.SOLDIER)
 
 class Mayor(Townsfolk):
-    def get_character(self) -> Character:
-        return Character.MAYOR
-
+    def __init__(self, name: str):
+        super().__init__(name, Character.MAYOR)
 
 ### Outsiders ###
 class Butler(Outsider):
-    def get_character(self) -> Character:
-        return Character.BUTLER
+    def __init__(self, name: str):
+        super().__init__(name, Character.BUTLER)
 
 class Saint(Outsider):
-    def get_character(self) -> Character:
-        return Character.SAINT
+    def __init__(self, name: str):
+        super().__init__(name, Character.SAINT)
 
 class Recluse(Outsider):
+    def __init__(self, name: str):
+        super().__init__(name, Character.RECLUSE)
+        
     def get_alignment(self) -> Alignment:
         return Alignment.EVIL
     
     def get_role(self) -> Role:
         return Role.DEMON
-
-    def get_character(self) -> Character:
+    
+    # Override get_character to implement Recluse's special ability
+    def get_character(self):
         return random.choice([Character.POISONER, Character.BARON, Character.SCARLET_WOMAN, Character.IMP])
 
 class Drunk(Outsider):
-    def get_character(self) -> Character:
-        return Character.DRUNK
-
+    def __init__(self, name: str):
+        super().__init__(name, Character.DRUNK)
 
 ### Minions ###
 class Poisoner(Minion):
-    def get_character(self) -> Character:
-        return Character.POISONER
+    def __init__(self, name: str):
+        super().__init__(name, Character.POISONER)
 
 class Spy(Minion):
+    def __init__(self, name: str):
+        super().__init__(name, Character.SPY)
+        
     def get_alignment(self) -> Alignment:
         return Alignment.GOOD
     
     def get_role(self) -> Role:
         return random.choice([Role.TOWNSFOLK, Role.OUTSIDER])
     
-    def get_character(self) -> Character:
-        return random.choice([Character.EMPATH, Character.FORTUNETELLER, Character.INVESTIGATOR, Character.SOLDIER, Character.SLAYER, Character.VIRGIN, Character.BUTLER, Character.SAINT, Character.DRUNK])
+    # Override get_character to implement Spy's special ability
+    def get_character(self):
+        return random.choice([Character.EMPATH, Character.FORTUNETELLER, Character.INVESTIGATOR, 
+                             Character.SOLDIER, Character.SLAYER, Character.VIRGIN, 
+                             Character.BUTLER, Character.SAINT, Character.DRUNK])
 
 class Baron(Minion):
-    def get_character(self) -> Character:
-        return Character.BARON
+    def __init__(self, name: str):
+        super().__init__(name, Character.BARON)
 
 class ScarletWoman(Minion):
-    def get_character(self) -> Character:
-        return Character.SCARLET_WOMAN
-
+    def __init__(self, name: str):
+        super().__init__(name, Character.SCARLET_WOMAN)
 
 ### Demons ###
 class Imp(Demon):
-    def get_character(self) -> Character:
-        return Character.IMP
+    def __init__(self, name: str):
+        super().__init__(name, Character.IMP)

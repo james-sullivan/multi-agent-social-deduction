@@ -15,7 +15,7 @@ During the day players can send messages to each other to persuade, strategize, 
 During the night the Storyteller will secretly give information to players based on their character's ability or allow them to secretly use their ability. All information at night is secret and only the player receiving the information or using their ability knows about it.
 
 ## Nomination for Execution
-Towards the end of the day the Storyteller will allow players to nomiate each other for execution. Each living player can only nominate one person per day and each person may only be nominated once per day. Dead players cannot nominate. Dead players only get one vote for the rest of the game. You can nominate any player including yourself or any other living or dead player.
+Towards the end of the day the Storyteller will allow players to nomiate each other for execution. Each living player can only nominate one person per day and each person may only be nominated once per day. You can nominate any player including yourself or any other living or dead player.
 
 During a nomination each player will vote starting with the player who is being nominated and proceeding clockwise. Players can vote yes or no. When each player votes, they first get to see the votes of the players who voted before them. 
 
@@ -31,6 +31,8 @@ Dead players are still in the game and can still talk to other players, but they
 
 ## Being Poisoned and Drunk
 Posioned and Drunk are status effects that can be applied to players. They function the exact same way and a player will not know if they are Poisoned or Drunk. If a player is Poisoned or Drunk their character's ability will not work and any information that they recieve from the Storyteller may be false.
+
+A player's abliity stops affecting the game as soon as they die, or they become poisoned or drunk.
 '''
 
 TROUBLE_BREWING_SCRIPT = '''

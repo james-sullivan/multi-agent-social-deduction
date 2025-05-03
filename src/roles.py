@@ -1,6 +1,8 @@
 from player import Player
 from game import Alignment
 from enum import Enum
+from typing import Optional
+from characters import Character
 
 class Role(Enum):
     TOWNSFOLK = "Townsfolk"
@@ -9,7 +11,7 @@ class Role(Enum):
     DEMON = "Demon"
 
 class Townsfolk(Player):
-    def __init__(self, name: str):
+    def __init__(self, name: str, character: Optional[Character] = None) -> None:
         super().__init__(name, Alignment.GOOD)
 
     def get_role(self) -> Role:
