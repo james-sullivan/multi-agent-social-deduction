@@ -1,4 +1,4 @@
-from game import Alignment, Vote
+from game import Alignment, Vote, PublicGameState
 from characters import Character
 from typing import Optional, List, Dict, Any, cast, TypedDict
 import json
@@ -9,7 +9,8 @@ from player_tools import MESSAGE_TOOL, SLAYER_TOOL, NOMINATION_TOOL
 from enum import Enum
 from prompts import BOTC_RULES, TROUBLE_BREWING_SCRIPT
 from dataclasses import dataclass
-
+from src.inference import request_llm_response
+from characters import Outsider, Townsfolk, Demon, Minion
 class DayActions(Enum):
     MESSAGE = "message"
     NOMINATION = "nomination"
@@ -56,19 +57,19 @@ class NoAction(DayAction):
 
 
 class Player:
-    def __init__(self, name: str, alignment: Alignment, character: Optional[Character] = None) -> None:
+    def __init__(self, name: str, alignment: Alignment, character: Character) -> None:
         self.name: str = name
         self.alive: bool = True
         self.history: list[str] = []
         self.notes: str = "No notes so far."
         self.alignment: Alignment = alignment
-        self.character: Optional[Character] = character
+        self.character: Character = character
         self.used_once_per_game: dict[DayActions, bool] = {action: False for action in ONCE_PER_GAME_ACTIONS}
         self.messages_left: int = 3
         self.used_nomination: bool = False
         self.used_dead_vote: bool = False
 
-    def end_of_day(self) -> None:
+    def start_of_day(self) -> None:
         self.used_nomination = False
         self.messages_left = 3
 
@@ -78,7 +79,7 @@ class Player:
     def vote(self,
              client: Anthropic,
              nominee: str,
-             public_player_state: dict,
+             public_game_state: PublicGameState,
              current_tally: int,
              required_votes: int,
              previous_votes: list[tuple[str, Vote]], 
@@ -102,7 +103,7 @@ class Player:
                 return Vote.NO
             
         # Get the player's vote based on the game state and previous votes
-        system_prompt = self._get_player_system_prompt(public_player_state)
+        system_prompt = self._get_player_system_prompt(public_game_state)
         
         if nominee == self.name:
             nominee_context = "You are the nominee for execution. "
@@ -116,45 +117,46 @@ class Player:
         for voter_name, vote in previous_votes:
             votes_context += f"- {voter_name}: {vote.name}\n"
         
-        message = client.messages.create(
-            model="claude-3-5-haiku-20240307",
-            max_tokens=100,
-            system=system_prompt,
-            messages=[
-                {
-                    "role": "user",
-                    "content": f"""
+        user_message = f"""
 You need to vote on the current nomination.
 {nominee_context}
-{current_tally} have been cast so far.
+{current_tally} votes have been cast so far.
 {required_votes_context}
 {votes_context}
 
-Should you vote YES or NO on this nomination? Consider the game state, your character's abilities, and the previous votes.
+Should you vote YES or NO on this nomination? Consider all relevant information.
 Respond with only 'YES' or 'NO'.
 """
-                }
-            ]
+        
+        response = request_llm_response(
+            client=client,
+            system_prompt=system_prompt,
+            user_message=user_message,
+            max_tokens=100
         )
         
-        response = message.content[0].text.strip().upper()
-            
-        # Return the appropriate vote
-        if response == "YES":
-            if not self.alive:
-                self.used_dead_vote = True
-            return Vote.YES
+        # Ensure response is a string and convert to uppercase
+        if isinstance(response, str):
+            vote_response = response.strip().upper()
+            # Return the appropriate vote
+            if vote_response == "YES":
+                if not self.alive:
+                    self.used_dead_vote = True
+                return Vote.YES
+            else:
+                return Vote.NO
         else:
+            # Default to NO if there was an issue with the response
             return Vote.NO
     
-    def _get_player_system_prompt(self, public_player_state: list[dict]) -> str:
+    def _get_player_system_prompt(self, public_game_state: PublicGameState) -> str:
         if self.character:
             character_prompt = f"Your character is {self.character.name}."
         else:
             character_prompt = ""
 
-        game_state = "Here is the publicly available player state in the order they are sitting in:" + ", ".join([json.dumps(player) for player in public_player_state])
-        seating_explanation = f"The seating order is important for several game mechanics such as voting order and character abilities. The seat adjacency wraps from the first to the last. For example, {public_player_state[0]['name']} is adjacent to {public_player_state[-1]['name']} and {public_player_state[1]['name']}."
+        game_state = "Here is the publicly available player state in the order they are sitting in:" + ", ".join([json.dumps(player) for player in public_game_state.player_state])
+        seating_explanation = f"The seating order is important for several game mechanics such as voting order and character abilities. The seat adjacency wraps from the first to the last. For example, {public_game_state.player_state[0]['name']} is adjacent to {public_game_state.player_state[-1]['name']} and {public_game_state.player_state[1]['name']}."
 
         system_prompt = BOTC_RULES + "\n\n" + \
             TROUBLE_BREWING_SCRIPT + "\n\n" + \
@@ -163,16 +165,17 @@ Respond with only 'YES' or 'NO'.
             f"You are {'alive' if self.alive else f'dead and you have {'not' if not self.used_dead_vote else ''} used your dead vote'}. " + \
             f"You have {"not" if self.used_nomination else ""} nominated today. " + \
             f"You have {self.messages_left} messages left that you can send today. " + "\n" + \
+            f"It is round {public_game_state.round_number} and the current phase is {public_game_state.current_phase}." + "\n" + \
             game_state + "\n" + \
             seating_explanation + "\n" + \
             "Here are your notes summarizing the game state:" + "\n" + \
             self.notes + "\n" + \
-            "Here's a complete history of the current day:" + "\n" + \
+            "Here's a complete history of the current round from oldest to newest:" + "\n" + \
             "\n".join(self.history)
 
         return system_prompt
     
-    def day_action(self, client: Anthropic, public_player_state: list[dict], nominations_open: bool = False) -> Optional[DayAction]:
+    def day_action(self, client: Anthropic, public_game_state: PublicGameState, nominations_open: bool = False) -> Optional[DayAction]:
         available_tools: List[ToolParam] = []
 
         if nominations_open and not self.used_nomination and self.alive:
@@ -194,104 +197,40 @@ Respond with only 'YES' or 'NO'.
         if not available_tools:
             return NoAction("No available actions left")        
       
-        system_prompt = self._get_player_system_prompt(public_player_state)
+        system_prompt = self._get_player_system_prompt(public_game_state)
+        user_message = "It is your turn to either take an action or pass. What do you want to do?"
         
-        # Add history to provide context
-        history_context = "\n".join(self.history) if self.history else "No prior information available."
+        response = request_llm_response(
+            client=client,
+            system_prompt=system_prompt,
+            user_message=user_message,
+            tools=available_tools
+        )
         
-        # Use ONLY the Anthropic SDK to make the call with the messages.create() method
-        try:
-            # Prepare message with correct types
-            user_message: MessageParam = {
-                "role": "user", 
-                "content": "It is your turn to either take an action or pass. What do you want to do?"
-            }
+        # Handle the response based on whether it's a tool response or not
+        if isinstance(response, dict) and "function_name" in response:
+            function_name = response["function_name"]
+            arguments = response.get("arguments", {})
             
-            # Use client.messages.create() directly
-            message = client.messages.create(
-                model="claude-3-5-haiku-20240307",
-                max_tokens=1024,
-                system=system_prompt,
-                messages=[user_message],
-                tools=available_tools,
-                tool_choice={"type": "any"}
-            )
-            
-            # Process the raw response for tools
-            for content_block in message.content:
-                # Check if we have a tool use block
-                if hasattr(content_block, 'type') and content_block.type == "tool_use":
-                    # For safely accessing tool properties
-                    function_name = content_block.name
-                    arguments_dict: Dict[str, Any] = {}
-                    
-                    # Extract input arguments safely
-                    if hasattr(content_block, 'input'):
-                        arguments_dict = cast(Dict[str, Any], content_block.input)
-                    
-                    # Process different tool types
-                    if function_name == "send_message":
-                        # Process message action - safely access dictionary values
-                        recipients: List[str] = []
-                        message_text: str = ""
-                        
-                        # Get recipients list
-                        if isinstance(arguments_dict, dict) and "recipients" in arguments_dict:
-                            recipients = cast(List[str], arguments_dict["recipients"])
-                        
-                        # Get message text
-                        if isinstance(arguments_dict, dict) and "message" in arguments_dict:
-                            message_text = cast(str, arguments_dict["message"])
-                        
-                        # Update state
-                        self.messages_left -= 1
-                        
-                        # Create and return action object
-                        return MessageAction(recipients, message_text)
-                        
-                    elif function_name == "nominate":
-                        # Process nomination action - safely access dictionary values
-                        player: str = ""
-                        reason: str = "No reason provided"
-                        
-                        # Get player
-                        if isinstance(arguments_dict, dict) and "player" in arguments_dict:
-                            player = cast(str, arguments_dict["player"])
-                        
-                        # Get reason
-                        if isinstance(arguments_dict, dict) and "reason" in arguments_dict:
-                            reason = cast(str, arguments_dict["reason"])
-                        
-                        # Update state
-                        self.used_nomination = True
-                        
-                        # Create and return action object
-                        return NominationAction(player, reason)
-                        
-                    elif function_name == "slayer_power":
-                        # Process slayer power action - safely access dictionary values
-                        target: str = ""
-                        
-                        # Get target
-                        if isinstance(arguments_dict, dict) and "target" in arguments_dict:
-                            target = cast(str, arguments_dict["target"])
-                        
-                        # Update state
-                        self.used_once_per_game[DayActions.SLAYER_POWER] = True
-                        
-                        # Create and return action object
-                        return SlayerPowerAction(target)
-                    elif function_name == "pass":
-                        return NoAction(f"{self.name} passed on their turn")
-                    else:
-                        return NoAction(f"{self.name} did not choose a tool")
-                       
-            return NoAction("No action taken")
-        except APIStatusError as e:
-            error_msg = f"API Error: {e.status_code} - {e.message}"
-            print(error_msg)
-            return NoAction(f"No Action: API Error: {e.status_code}")
-        except Exception as e:
-            error_msg = f"Error making API request: {e}"
-            print(error_msg)
-            return NoAction(f"No Action: Exception: {str(e)[:50]}...")
+            if function_name == "send_message":
+                recipients = arguments.get("recipients", [])
+                message_text = arguments.get("message", "")
+                self.messages_left -= 1
+                return MessageAction(recipients, message_text)
+                
+            elif function_name == "nominate":
+                player = arguments.get("player", "")
+                reason = arguments.get("reason", "No reason provided")
+                self.used_nomination = True
+                return NominationAction(player, reason)
+                
+            elif function_name == "slayer_power":
+                target = arguments.get("target", "")
+                self.used_once_per_game[DayActions.SLAYER_POWER] = True
+                return SlayerPowerAction(target)
+                
+            elif function_name == "pass":
+                return NoAction(f"{self.name} passed on their turn")
+                
+        # Default if no action was taken or there was an error
+        return NoAction(f"{self.name} did not choose a valid action")

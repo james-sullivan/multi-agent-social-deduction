@@ -12,7 +12,7 @@ MESSAGE_TOOL = ToolParam(
                 "items": {
                     "type": "string"
                 },
-                "description": "List of player names to send the message to."
+                "description": "List of player names to send the message to. For example, if you want to send a message to Susan and John, you would put ['Susan', 'John'] here."
             },
             "message": {
                 "type": "string",
@@ -26,7 +26,7 @@ MESSAGE_TOOL = ToolParam(
 # Slayer tool for using the one-time special ability
 SLAYER_TOOL = ToolParam(
     name="slayer_power",
-    description="Pick a player, if they are a Demon they will die. This power can only be used once per game.",
+    description="Pick a player, if they are a Demon they will die. This power can only be used once per game and will only work if you are the Slayer.",
     input_schema={
         "type": "object",
         "properties": {
@@ -42,7 +42,7 @@ SLAYER_TOOL = ToolParam(
 # Nomination tool for eliminating players
 NOMINATION_TOOL = ToolParam(
     name="nominate",
-    description="Nominate a player for execution. This will start a vote to execute the nominated player. You can only nominate once per day and each player can only be nominated once per day. The reason you provide will be shared with the other players and should convince them to vote with you.",
+    description="Nominate a player for execution. This will start a vote to execute the nominated player. You can only nominate once per day and each player can only be nominated once per day. The reason you provide will be shared with the other players.",
     input_schema={
         "type": "object",
         "properties": {
@@ -52,7 +52,7 @@ NOMINATION_TOOL = ToolParam(
             },
             "reason": {
                 "type": "string",
-                "description": "The reasoning for nominating the player. This will be shared with the other players and should convince them to vote with you."
+                "description": "The reasoning for nominating the player. This will be shared with all other players."
             }
         },
         "required": ["player", "reason"]
@@ -64,13 +64,13 @@ PASS_TOOL = ToolParam(
     description="Choose not to take an action at this time. You may or may not have a chance to act again today.",
     input_schema={
         "type": "object",
-
-        "reason": {
-            "type": "string",
-            "description": "The reasoning for passing on your turn. This will be shared with the other players."
-        }
-    },
-    "required": ["reason"],
+        "properties": {
+            "reason": {
+                "type": "string",
+                "description": "The reasoning for passing on your turn. This will be shared with the other players."
+            }
+        },
+        "required": ["reason"]
     }
 )
 

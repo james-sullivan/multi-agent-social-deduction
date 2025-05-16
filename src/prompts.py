@@ -1,14 +1,17 @@
 BOTC_RULES = '''
 # Rules Summary
-Blood on the Clocktower is a social deduction game similar to Werewolf (or Mafia). At the start of the game each player is secretly given a character that determines what team they are on and what special abilities they have. There can only be one of each character in the game. Players are either on the Good team or the Evil team. The Evil team members know who each other are but the Good team does not know who anyone but themselves are. The game is moderated by the Storyteller who is a neutral agent that will enforce the rules and give informaiton to players.
+Blood on the Clocktower is a social deduction game similar to Werewolf (or Mafia). At the start of the game each player is secretly given a character that determines what team they are on and what special abilities they have. There can only be one of each character in the game. Players are either on the Good team or the Evil team. The Evil team members know who each other are but the Good team does not know who anyone but themselves are. 
+
+## Storyteller
+The game is moderated by the Storyteller who is a neutral agent that will enforce the rules and give informaiton to players. The Storyteller will also have decisions to make about things like what false information to give to players. The Storyteller maintains the complete game state inside of the Grimoire. This include what character each player is and what status effects they have.
 
 ## Objectives
 The Good team wins if they execute the Demon.
 
-The Evil team wins if there are only 2 players left alive (and one of them is the Demon).
+The Evil team wins if there are only 2 players left alive (and the Demon is still alive).
 
 ## Gameplay
-The game is played in rounds. Each round has a day phase and then a night phase. The game continues until either team wins.
+The game is played in rounds. Each round has a night phase and then a day phase. The game continues until either team wins.
 
 During the day players can send messages to each other to persuade, strategize, coordinate, theorize, and share information. At the end of the day players will vote on who they want to nominate for execution and at the end of the day, if a player has been nominated, that player will die.
 
@@ -17,9 +20,15 @@ During the night the Storyteller will secretly give information to players based
 ## Nomination for Execution
 Towards the end of the day the Storyteller will allow players to nomiate each other for execution. Each living player can only nominate one person per day and each person may only be nominated once per day. You can nominate any player including yourself or any other living or dead player.
 
-During a nomination each player will vote starting with the player who is being nominated and proceeding clockwise. Players can vote yes or no. When each player votes, they first get to see the votes of the players who voted before them. 
+During a nomination each player will vote starting with the player who is being nominated and proceeding left to right until all players have voted. Players can vote yes or no. When each player votes, they first get to see the votes of the players who voted before them. 
 
-The number of votes needed for a successful nomination is at least half of the living players rounded up. If a player is successfully nominated, future nominations will need to exceed the number of votes previously cast for that player to become the next nominee. If there is a tie, neither player is nominated and both players are safe for the day.
+The number of votes needed for a successful nomination is at least half of the living players rounded up. If a player is successfully nominated, future nominations will need to exceed the number of votes previously cast for that player to become the next nominee. If there is a tie, neither player is nominated and both players are safe for the day. At the end of the day, the currently nominated player will be executed.
+
+## Alignment
+The alignment of a player is the team they are on. A player can be on the Good team or the Evil team. By default, Townsfolk and Outsiders are Good players. Minions and the Demon are Evil players.
+
+## Characters
+Each player has a character. Each character has an ability. A player's character is seperate from their alignment. The moment a player dies, or becomes poisoned or drunk, their character's ability stops affecting the game.
 
 ## Roles
 The Good team is made up of Townsfolk and Outsiders. Townsfolk are Good players who have an ability that is helpful to the Good team. Outsiders are Good players who have an ability that is harmful to the Good team.
@@ -32,7 +41,8 @@ Dead players are still in the game and can still talk to other players, but they
 ## Being Poisoned and Drunk
 Posioned and Drunk are status effects that can be applied to players. They function the exact same way and a player will not know if they are Poisoned or Drunk. If a player is Poisoned or Drunk their character's ability will not work and any information that they recieve from the Storyteller may be false.
 
-A player's abliity stops affecting the game as soon as they die, or they become poisoned or drunk.
+## Registers
+The rules and characters abilites sometimes talk about a player "registering" as good/evil, a particuler role, or a particular character. This means that the game mechanics will treat them as the character, alignment, or role they are registering as, even if they are not that character, alignment, or role. For example, if a player "might" register as evil, then the Storyteller can decide to show another player a demon character when another player uses their ability to check what character they are.
 '''
 
 TROUBLE_BREWING_SCRIPT = '''
@@ -62,7 +72,7 @@ The following is the complete list of all characters that can be in the game.
 • Poisoner: Each night they choose a player to poison for that night and the next day
 • Spy: Each night, sees the Grimoire (contains complete informaiton about the game state); might register as Good and as a Townsfolk or Outsider
 • Scarlet_Woman: If 5+ players are alive and the Demon dies, becomes the Demon
-• Baron: Adds extra Outsiders to the game during setup. Player count stays the same and Townsfolk are removed to make room. (+2 Outsiders)
+• Baron: Adds two extra Outsiders to the game during setup. The player count stays the same and Townsfolk are removed to make room
 
 ## Demon (Evil)
 • Imp: Each night (except the first), chooses a player to kill; if they kill themselves, the Storyteller picks a Minion to become the new Imp

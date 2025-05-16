@@ -1,10 +1,11 @@
 from enum import Enum
-from typing import Dict, List, Optional, Tuple, Any
 import random
 import logging
+from dataclasses import dataclass
 
-from src.agent_old import Agent, Role
-
+from src.agent_old import Role
+from src.player import DayAction, MessageAction, NominationAction, SlayerPowerAction, NoAction, Player
+from src.characters import Character, Townsfolk, Outsider, Demon, Minion
 logger = logging.getLogger(__name__)
 
 class Vote(Enum):
@@ -20,29 +21,79 @@ class Phase(Enum):
     NIGHT = "Night"
     DAY = "Day"
 
+@dataclass
+class PublicGameState:
+    player_state: list[dict]
+    current_phase: Phase
+    round_number: int
+
 class Game:
-    def __init__(self, players: Dict[str, Agent]):
-        self.state = GameState(players)
-        self.players = players
+    def __init__(self, characters: list[Character], outsiders: int, townsfolk: int, minons: int):
+        names = ["Susan", "John", "Emma", "Michael", "Olivia", "James", "Sophia", "William", "Ava", "Steve", "Emily", "Daniel", "Isabella", "David", "Mia"]
+        random.shuffle(names)
+        self.players: list[Player] = []
+
+        if characters:
+            for character in characters:
+                self.players.append(Player(name=names[-1], role=character))
+                names.pop()
+        else:
+            for _ in range(outsiders):
+                self.players.append(Player(name=names[-1], role=Role.OUTSIDER))
+                names.pop()
+
+            for _ in range(townsfolk):
+                self.players.append(Player(name=names[-1], role=Role.TOWNSFOLK))
+                names.pop()
+
+            for _ in range(minons):
+                self.players.append(Player(name=names[-1], role=Role.MINION))
+                names.pop()
+
+        random.shuffle(self.players)
+        self.player_dict: dict[str, Player] = {player.name: player for player in self.players}
+        self.round_number = 1
+        self.current_phase = Phase.NIGHT
+        self.drunk_and_poisoned: dict[Player, list[Player]] = {}
+
+    def _get_public_game_state(self) -> PublicGameState:
+        """
+        Returns the public game state that can be shared with all players.
+        This includes information about all players without revealing their roles.
+        """
+        player_state = []
         
-    def setup_game(self) -> None:
-        # Inform werewolves about each other
-        werewolves = [name for name, agent in self.players.items() 
-                      if agent.role == Role.WEREWOLF]
-        
-        for wolf_name in werewolves:
-            self.players[wolf_name].set_known_werewolves(werewolves)
+        for player in self.players:
+            player_info = {
+                "name": player.name,
+                "alive": player.is_alive,
+                "used_dead_vote": player.used_dead_vote if not player.is_alive else False,
+            }
             
-        # Record initial game state - without revealing roles to agents in game history
-        player_names = ", ".join(list(self.players.keys()))
-        self.state.record_event(f"Game started with players: {player_names}")
+            player_state.append(player_info)
         
-        # Log complete role information for admin/debugging (but don't add to game history)
-        roles_info = ", ".join([f"{name}: {agent.role.name}" 
-                              for name, agent in self.players.items()])
-        logger.info(f"Game roles: {roles_info}")
+        return PublicGameState(
+            player_state=player_state,
+            current_phase=self.current_phase,
+            round_number=self.round_number
+        )
+
+    def _scarlet_woman_check(self, dead_player: Player) -> bool:
+        scarlet_woman = [player for player in self.players if player.is_alive and player.character == Minion.SCARLET_WOMAN and not self._is_drunk_or_poisoned(player)]
+
+        if isinstance(dead_player.character, Demon) and len(scarlet_woman) == 1:
+            woman = scarlet_woman[0]
+            woman.character = dead_player.character
+            self._broadcast_info([woman], f"Storyteller: The Demon has died and you have become the new Demon. Your chacter is now {woman.character.value}")
+            return True
+        return False
     
-    def print_status_summary(self) -> None:
+    def _kill_player(self, player: Player) -> None:
+        player.is_alive = False
+        self._scarlet_woman_check(player)
+        self._broadcast_info(self._all_players(), f"Storyteller: {player.name} has been died.")
+
+    def _print_status_summary(self) -> None:
         """Print a summary of each character's role and status"""
         summary = "\n" + "=" * 50
         summary += "\n               CHARACTER STATUS SUMMARY"
@@ -50,193 +101,112 @@ class Game:
         summary += "\nName        | Role       | Status"
         summary += "\n" + "-" * 40
         
-        # Sort by role first, then by alive status, then by name
-        # Villagers first, then Seers, then Werewolves
-        def sort_key(item):
-            name, agent = item
-            # Priority by role (1=Villager, 2=Seer, 3=Werewolf)
-            role_priority = {
-                Role.VILLAGER: 1,
-                Role.SEER: 2,
-                Role.WEREWOLF: 3
-            }
-            is_dead = name not in self.state.alive_players
-            return (role_priority[agent.role], is_dead, name)
+        # Sort alphabetically by name
+        sorted_players = sorted(self.players)
         
-        sorted_players = sorted(self.players.items(), key=sort_key)
-        
-        for name, agent in sorted_players:
-            status = "ALIVE" if name in self.state.alive_players else "DEAD"
+        for player in sorted_players:
+            status = "ALIVE" if player.is_alive else "DEAD"
             # Format with consistent spacing
-            summary += f"\n{name:<12}| {agent.role.name:<10} | {status}"
+            summary += f"\n{player.name:<12}| {player.role.name:<10} | {status}"
         
         summary += "\n" + "=" * 50
         
         # Print directly to console with color formatting
         # but don't also log it (which would cause duplicate output)
         print(f"\033[1;36m{summary}\033[0m")  # Cyan, bold text for better visibility
-        
-        # Add summary to game history without logging to console
-        self.state.history.append(f"CHARACTER STATUS SUMMARY: {len(self.state.alive_players)} alive, {len(self.players) - len(self.state.alive_players)} dead")
+
+    def _all_players(self, exclude: list[Player] | None = None) -> list[Player]:
+        return [player for player in self.players if player not in exclude]
     
-    def run_night_phase(self) -> None:
-        self.state.phase = Phase.NIGHT
-        self.state.night_count += 1
-        self.state.record_event(f"Night {self.state.night_count} has begun")
+    def _is_drunk_or_poisoned(self, player: Player, visited: set[Player] = None) -> bool:
+        # Initialize visited set and check in one step
+        if visited is None:
+            visited = set()
+             
+        if player.character == Townsfolk.DRUNK:
+            return True
         
-        # Print night phase header to console
-        print(f"\n\033[1;35m=== NIGHT {self.state.night_count} ===\033[0m\n")
+        visited.add(player)
         
-        # Werewolves choose a victim
-        werewolves = self.state.get_alive_werewolves()
-        if not werewolves:
-            return
-            
-        # Get werewolf votes
-        votes: Dict[str, int] = {}
-        werewolf_votes: Dict[str, str] = {}  # Track which werewolf voted for whom
+        for affecting_player in self.drunk_and_poisoned[player]:
+            if affecting_player not in visited and affecting_player.is_alive and not self._is_drunk_or_poisoned(affecting_player, visited):
+                return True
         
-        for wolf_name in werewolves:
-            wolf = self.players[wolf_name]
-            vote = wolf.night_action(self.state.get_alive_players(), 
-                                    self.state.get_alive_werewolves())
-            if vote and vote in self.state.get_alive_players() and vote not in werewolves:
-                votes[vote] = votes.get(vote, 0) + 1
-                werewolf_votes[wolf_name] = vote
-                
-                # Log and print each werewolf's vote
-                self.state.record_event(f"Werewolf {wolf_name} voted to eliminate {vote}")
-                print(f"\033[1;31mWerewolf {wolf_name} voted to eliminate {vote}\033[0m")
-        
-        # Determine victim
-        victim: Optional[str] = None
-        max_votes = 0
-        for player_name, vote_count in votes.items():
-            if vote_count > max_votes:
-                max_votes = vote_count
-                victim = player_name
-                
-        if victim:
-            self.state.record_event(f"Werewolves chose to eliminate {victim}")
-            self.state.eliminate_player(victim)
-            
-            # Print werewolf attack to console
-            print(f"\033[1;31mThe werewolves attacked and eliminated {victim}!\033[0m\n")
-        
-        # Seer investigates a player
-        for player_name in self.state.get_alive_players():
-            player = self.players[player_name]
-            if player.role == Role.SEER:
-                target = player.night_action(
-                    self.state.get_alive_players(), 
-                    self.state.get_alive_werewolves()
-                )
-                if target in self.state.get_alive_players():
-                    is_werewolf = self.players[target].role == Role.WEREWOLF
-                    player.receive_investigation_result(target, is_werewolf)
-                    self.state.record_event(f"Seer investigated {target}")
-                    
-                    # Print seer investigation to console (only visible to us as observers)
-                    result = "ARE" if is_werewolf else "are NOT"
-                    print(f"\033[1;34mThe Seer investigated {target} and discovered they {result} a werewolf.\033[0m\n")
-        
-        # Print status summary at the end of the phase
-        self.print_status_summary()
+        return False
     
-    def run_day_phase(self) -> None:
-        self.state.phase = Phase.DAY
-        self.state.day_count += 1
-        self.state.record_event(f"Day {self.state.day_count} has begun")
-        
-        # Print day phase header to console
-        print(f"\n\033[1;32m=== DAY {self.state.day_count} ===\033[0m\n")
-        
-        # Inform players about the night's events
-        for player_name in self.state.get_alive_players():
-            player = self.players[player_name]
-            player.update_game_state(self.state)
-        
-        # Discussion phase
-        discussion: List[Tuple[str, str]] = []
-        for player_name in self.state.get_alive_players():
-            player = self.players[player_name]
-            message = player.discuss(discussion)
-            if message:
-                discussion.append((player_name, message))
-                # Add a newline after the message for better readability
-                self.state.record_event(f"{player_name} says: {message}\n")
-                
-                # Also print directly to console with a better format
-                print(f"\n\033[1m{player_name}:\033[0m {message}\n")
-        
-        # Voting phase
-        votes: Dict[str, int] = {}
-        for player_name in self.state.get_alive_players():
-            player = self.players[player_name]
-            vote = player.vote(self.state.get_alive_players(), discussion)
-            if vote and vote in self.state.get_alive_players():
-                votes[vote] = votes.get(vote, 0) + 1
-                self.state.record_event(f"{player_name} voted for {vote}")
-                
-                # Also print the vote directly to console
-                print(f"\033[1;33m{player_name} voted for {vote}\033[0m")
-        
-        # Determine elimination
-        if not votes:
-            self.state.record_event("No valid votes were cast")
-            return
-            
-        max_votes = 0
-        eliminated: Optional[str] = None
-        for player_name, vote_count in votes.items():
-            if vote_count > max_votes:
-                max_votes = vote_count
-                eliminated = player_name
-            elif vote_count == max_votes:
-                # In case of a tie, randomly select
-                if random.random() > 0.5:
-                    eliminated = player_name
-        
-        if eliminated:
-            self.state.record_event(f"{eliminated} was voted out")
-            self.state.eliminate_player(eliminated)
-            
-            # Print elimination result with emphasis
-            print(f"\n\033[1;31m{eliminated} was voted out and eliminated!\033[0m\n")
-        
-        # Print status summary at the end of the phase
-        self.print_status_summary()
+    def _broadcast_info(self, recipients: list[str | Player], info: str) -> None:    
+        for recipient in recipients:
+            if isinstance(recipient, Player):
+                recipient.give_info(info)
+            else:
+                self.player_dict[recipient].give_info(info)
     
-    def run_game(self, max_days=10) -> str:
-        self.setup_game()
-        
-        # Print initial status summary
-        logger.info("Initial game state:")
-        self.print_status_summary()
-        
-        while not self.state.game_over and self.state.day_count < max_days:
-            self.run_day_phase()
-            
-            if self.state.check_win_condition():
-                break
-                
-            self.run_night_phase()
-            
-            if self.state.check_win_condition():
-                break
-        
-        if self.state.winner:
-            result = f"Game over! {self.state.winner} win!"
-            # Print game over message with emphasis
-            print(f"\n\033[1;31m{result}\033[0m\n")
+    def _run_night_phase(self) -> None:
+        self.current_phase = Phase.NIGHT
+    
+    def _slayer_power(self, player: Player, action: SlayerPowerAction) -> bool:
+        it_works: bool = (player.character == Townsfolk.SLAYER and 
+                          not self._is_drunk_or_poisoned(player) and 
+                          isinstance(self.player_dict[action.target].character, Demon))
+        # If it works
+        if it_works:
+            self._broadcast_info(self._all_players(), f"{player.name} has used their slayer power on {action.target} and killed them.")
+        # If it doesn't work
         else:
-            result = "Game ended with no clear winner after maximum days"
-            print(f"\n\033[1;33m{result}\033[0m\n")
+            self._broadcast_info(self._all_players(), f"{player.name} has used their slayer power on {action.target} and nothing happened.")
+
+        return it_works
+
+    def _run_day_phase(self) -> None:
+        self.current_phase = Phase.DAY
+        for player in self.players:
+            player.start_of_day()
         
-        self.state.record_event(result)
+        day_players: list[Player] = list(self.players)
+        random.shuffle(day_players)
+
+        for _ in range(2):
+            for player in day_players:
+                action: DayAction = player.day_action()
+
+                if isinstance(action, MessageAction):
+                    self._broadcast_info(action.recipients, f"Message {player.name} to {action.recipients}: {action.message}")
+                elif isinstance(action, NominationAction):
+                    self._broadcast_info(self._all_players(), f"{player.name} has nominated {action.player} for execution.")
+                elif isinstance(action, SlayerPowerAction):
+                    self._slayer_power(action)
+                elif isinstance(action, NoAction):
+                    pass
+
+    def _game_over(self) -> tuple[bool, Alignment | None]:
+        alive_count = sum(player.is_alive for player in self.players)
+        alive_demons = sum(player.role == Role.DEMON for player in self.players)
         
-        # Remove final status summary - we don't need it
-        # logger.info("Final game state:")
-        # self.print_status_summary()
+        if alive_demons == 0:
+            return True, Alignment.GOOD
         
-        return result 
+        if alive_count <= 2:
+            return True, Alignment.EVIL
+        
+        return False, None
+    
+    def run_game(self, max_rounds=6) -> Alignment | None:
+        logger.info("Initial game state:")
+        self._print_status_summary()
+        
+        while self.round_number <= max_rounds:
+            self._run_night_phase()
+
+            game_over, alignment = self._game_over()
+            if game_over:
+                return alignment
+            
+            self._run_day_phase()
+
+            game_over, alignment = self._game_over()
+            if game_over:
+                return alignment
+
+            self.round_number += 1
+               
+        return None

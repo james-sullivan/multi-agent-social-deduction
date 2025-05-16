@@ -1,9 +1,13 @@
-from roles import Townsfolk, Outsider, Minion, Demon, Role
+# from roles import Townsfolk, Outsider, Minion, Demon, Role
 from enum import Enum
 import random
 from game import Alignment
 
 class Character(Enum):
+    """Base enum for all characters - empty by design"""
+    pass
+
+class Townsfolk(Character):
     WASHERWOMAN = "Washerwoman"
     LIBRARIAN = "Librarian"
     INVESTIGATOR = "Investigator"
@@ -17,16 +21,24 @@ class Character(Enum):
     SLAYER = "Slayer"
     SOLDIER = "Soldier"
     MAYOR = "Mayor"
+
+class Outsider(Character):
     BUTLER = "Butler"
     SAINT = "Saint"
     RECLUSE = "Recluse"
     DRUNK = "Drunk"
+
+class Minion(Character):
     POISONER = "Poisoner"
     SPY = "Spy"
     BARON = "Baron"
     SCARLET_WOMAN = "Scarlet_Woman"
+
+class Demon(Character):
     IMP = "Imp"
 
+
+'''
 ### Townsfolk ###
 class Washerwoman(Townsfolk):
     def __init__(self, name: str):
@@ -146,3 +158,4 @@ class ScarletWoman(Minion):
 class Imp(Demon):
     def __init__(self, name: str):
         super().__init__(name, Character.IMP)
+'''
