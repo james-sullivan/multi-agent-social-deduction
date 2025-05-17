@@ -78,6 +78,17 @@ class Player:
     def give_info(self, info: str) -> None:
         self.history.append(info)
 
+    def summarize_history(self, public_game_state: PublicGameState) -> None:
+        """Summarize the player's history into their notes using AI."""
+        if not self.history:
+            self.notes = "No notes so far."
+            return
+        
+        system_prompt = self._get_player_system_prompt(public_game_state)
+        user_message = "It's time to update your notes using the history events. After this update your history will be cleared so make sure that all of the important information is inlcuded in your notes."
+        
+        self.notes = request_llm_response(system_prompt, user_message)
+
     def vote(self,
              nominee: str,
              public_game_state: PublicGameState,
@@ -153,23 +164,27 @@ Respond with only 'YES' or 'NO'.
             # Default to NO if there was an issue with the response
             return Vote.NO
     
-    def _get_player_system_prompt(self, public_game_state: PublicGameState) -> str:
+    def _get_player_system_prompt(self, public_game_state: PublicGameState, inlcude_history: bool = True) -> str:
         game_state = "Here is the publicly available player state in the order they are sitting in:" + ", ".join([json.dumps(player) for player in public_game_state.player_state])
         seating_explanation = f"The seating order is important for several game mechanics such as voting order and character abilities. The seat adjacency wraps from the first to the last. For example, {public_game_state.player_state[0]['name']} is adjacent to {public_game_state.player_state[-1]['name']} and {public_game_state.player_state[1]['name']}."
 
-        system_prompt = BOTC_RULES + "\n\n" + \
-            TROUBLE_BREWING_SCRIPT + "\n\n" + \
-            f"You are a player. Your name is {self.name}. Your character is {self.character.value}. You are on the {self.alignment.name} team. " + \
-            f"You are {'alive' if self.alive else f'dead and you have {'not' if not self.used_dead_vote else ''} used your dead vote'}. " + \
-            f"You have {"not" if self.used_nomination else ""} nominated today. " + \
-            f"You have {self.messages_left} messages left that you can send today. " + "\n" + \
-            f"It is round {public_game_state.round_number} and the current phase is {public_game_state.current_phase}." + "\n" + \
-            game_state + "\n" + \
-            seating_explanation + "\n" + \
-            "Here are your notes summarizing the previous rounds:" + "\n" + \
-            self.notes + "\n" + \
-            "Here's a complete history of the current round from oldest to newest:" + "\n" + \
-            "\n".join(self.history)
+        system_prompt = f"""{BOTC_RULES}
+
+{TROUBLE_BREWING_SCRIPT}
+
+You are a player. Your name is {self.name}. Your character is {self.character.value}. You are on the {self.alignment.name} team. 
+You are {'alive' if self.alive else f'dead and you have {'not' if not self.used_dead_vote else ''} used your dead vote'}. 
+You have {"not" if self.used_nomination else ""} nominated today. 
+You have {self.messages_left} messages left that you can send today. 
+It is round {public_game_state.round_number} and the current phase is {public_game_state.current_phase}.
+{game_state}
+{seating_explanation}
+
+Here are your notes summarizing the previous rounds:
+{self.notes}
+
+Here's your history of the current round from oldest to newest:
+{"\n".join(self.history)}"""
 
         return system_prompt
     

@@ -216,13 +216,18 @@ class Game:
         self.current_phase = Phase.DAY
         for player in self.players:
             player.start_of_day()
-        
-        day_players: list[Player] = list(self.players)
-        random.shuffle(day_players)
 
-        for _ in range(2):
+        loops = 3
+        for i in range(loops):
+            if i == loops - 1:
+                self.nominations_open = True
+                self._broadcast_info(self._all_players(), "Storyteller: Nominations are now open.")
+        
+            day_players: list[Player] = list(self.players)
+            random.shuffle(day_players)
+
             for player in day_players:
-                action: DayAction = player.day_action()
+                action: DayAction = player.day_action(self._get_public_game_state(), self.nominations_open)
 
                 if isinstance(action, MessageAction):
                     self._send_message(player, action.recipients, action.message)
@@ -236,17 +241,17 @@ class Game:
                 elif isinstance(action, NoAction):
                     pass
 
-    def _game_over(self) -> tuple[bool, Alignment | None]:
+    def _game_over(self) -> Alignment | None:
         alive_count = sum(player.is_alive for player in self.players)
         alive_demons = sum(player.role == Role.DEMON for player in self.players)
         
         if alive_demons == 0:
-            return True, Alignment.GOOD
+            return Alignment.GOOD
         
         if alive_count <= 2:
-            return True, Alignment.EVIL
+            return Alignment.EVIL
         
-        return False, None
+        return None
     
     def run_game(self, max_rounds=6) -> Alignment | None:
         logger.info("Initial game state:")
@@ -255,15 +260,17 @@ class Game:
         while self.round_number <= max_rounds:
             self._run_night_phase()
 
-            game_over, alignment = self._game_over()
+            game_over = self._game_over()
             if game_over:
-                return alignment
+                return game_over
             
-            self._run_day_phase()
-
-            game_over, alignment = self._game_over()
+            game_over = self._run_day_phase()
             if game_over:
-                return alignment
+                return game_over
+
+            game_over = self._game_over()
+            if game_over:
+                return game_over
 
             self.round_number += 1
                
