@@ -1,3 +1,4 @@
+from __future__ import annotations
 from game import Alignment, Vote, PublicGameState
 from characters import Character
 from typing import Optional, List, Dict, Any, cast, TypedDict
@@ -36,11 +37,11 @@ class MessageAction(DayAction):
 
 @dataclass
 class NominationAction(DayAction):
-    player: str
+    nominee: str
     
-    def __init__(self, player: str, reason: str):
+    def __init__(self, nominee: str, reason: str):
         super().__init__(DayActions.NOMINATION, reason)
-        self.player = player
+        self.nominee = nominee
 
 @dataclass
 class SlayerPowerAction(DayAction):
@@ -67,6 +68,7 @@ class Player:
         self.used_once_per_game: dict[DayActions, bool] = {action: False for action in ONCE_PER_GAME_ACTIONS}
         self.messages_left: int = 3
         self.used_nomination: bool = False
+        self.nominated_today: bool = False
         self.used_dead_vote: bool = False
 
     def start_of_day(self) -> None:
@@ -77,11 +79,11 @@ class Player:
         self.history.append(info)
 
     def vote(self,
-             client: Anthropic,
              nominee: str,
              public_game_state: PublicGameState,
              current_tally: int,
-             required_votes: int,
+             required_to_tie: int,
+             required_to_nominate: int,
              previous_votes: list[tuple[str, Vote]], 
              bulter_player_choice: str | None = None) -> Vote:
         
@@ -110,7 +112,10 @@ class Player:
         else:
             nominee_context = f"The nominee for execution is {nominee}. "
 
-        required_votes_context = f"{required_votes} votes are required to execute the nominee."
+        if required_to_tie:
+            required_votes_context = f"{required_to_nominate} votes are required to execute the nominee. {required_to_tie} votes are required to tie the previous nominee. "
+        else:
+            required_votes_context = f"{required_to_nominate} votes are required to execute the nominee. "
 
         # Format previous votes for context
         votes_context = "Previous votes in this nomination:\n"
@@ -129,7 +134,6 @@ Respond with only 'YES' or 'NO'.
 """
         
         response = request_llm_response(
-            client=client,
             system_prompt=system_prompt,
             user_message=user_message,
             max_tokens=100
@@ -150,32 +154,26 @@ Respond with only 'YES' or 'NO'.
             return Vote.NO
     
     def _get_player_system_prompt(self, public_game_state: PublicGameState) -> str:
-        if self.character:
-            character_prompt = f"Your character is {self.character.name}."
-        else:
-            character_prompt = ""
-
         game_state = "Here is the publicly available player state in the order they are sitting in:" + ", ".join([json.dumps(player) for player in public_game_state.player_state])
         seating_explanation = f"The seating order is important for several game mechanics such as voting order and character abilities. The seat adjacency wraps from the first to the last. For example, {public_game_state.player_state[0]['name']} is adjacent to {public_game_state.player_state[-1]['name']} and {public_game_state.player_state[1]['name']}."
 
         system_prompt = BOTC_RULES + "\n\n" + \
             TROUBLE_BREWING_SCRIPT + "\n\n" + \
-            f"You are a player. Your name is {self.name}. You are on the {self.alignment.name} team. " + \
-            character_prompt + "\n" + \
+            f"You are a player. Your name is {self.name}. Your character is {self.character.value}. You are on the {self.alignment.name} team. " + \
             f"You are {'alive' if self.alive else f'dead and you have {'not' if not self.used_dead_vote else ''} used your dead vote'}. " + \
             f"You have {"not" if self.used_nomination else ""} nominated today. " + \
             f"You have {self.messages_left} messages left that you can send today. " + "\n" + \
             f"It is round {public_game_state.round_number} and the current phase is {public_game_state.current_phase}." + "\n" + \
             game_state + "\n" + \
             seating_explanation + "\n" + \
-            "Here are your notes summarizing the game state:" + "\n" + \
+            "Here are your notes summarizing the previous rounds:" + "\n" + \
             self.notes + "\n" + \
             "Here's a complete history of the current round from oldest to newest:" + "\n" + \
             "\n".join(self.history)
 
         return system_prompt
     
-    def day_action(self, client: Anthropic, public_game_state: PublicGameState, nominations_open: bool = False) -> Optional[DayAction]:
+    def day_action(self, public_game_state: PublicGameState, nominations_open: bool = False) -> Optional[DayAction]:
         available_tools: List[ToolParam] = []
 
         if nominations_open and not self.used_nomination and self.alive:
@@ -201,7 +199,6 @@ Respond with only 'YES' or 'NO'.
         user_message = "It is your turn to either take an action or pass. What do you want to do?"
         
         response = request_llm_response(
-            client=client,
             system_prompt=system_prompt,
             user_message=user_message,
             tools=available_tools

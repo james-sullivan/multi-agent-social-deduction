@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from src.agent_old import Role
 from src.player import DayAction, MessageAction, NominationAction, SlayerPowerAction, NoAction, Player
 from src.characters import Character, Townsfolk, Outsider, Demon, Minion
+from src.utils import format_vote_history
+
 logger = logging.getLogger(__name__)
 
 class Vote(Enum):
@@ -52,9 +54,11 @@ class Game:
 
         random.shuffle(self.players)
         self.player_dict: dict[str, Player] = {player.name: player for player in self.players}
-        self.round_number = 1
-        self.current_phase = Phase.NIGHT
+        self.round_number: int = 1
+        self.current_phase: Phase = Phase.NIGHT
         self.drunk_and_poisoned: dict[Player, list[Player]] = {}
+        self.chopping_block: tuple[int, Player] | None = None
+        self.nominations_open: bool = False
 
     def _get_public_game_state(self) -> PublicGameState:
         """
@@ -88,10 +92,13 @@ class Game:
             return True
         return False
     
-    def _kill_player(self, player: Player) -> None:
+    def _kill_player(self, player: Player, broadcast: bool = True) -> tuple[list[Player], str]:
         player.is_alive = False
         self._scarlet_woman_check(player)
-        self._broadcast_info(self._all_players(), f"Storyteller: {player.name} has been died.")
+        message = f"Storyteller: {player.name} has been died."
+        if broadcast:
+            self._broadcast_info(self._all_players(), message)
+        return self._all_players(), message
 
     def _print_status_summary(self) -> None:
         """Print a summary of each character's role and status"""
@@ -150,14 +157,62 @@ class Game:
                           isinstance(self.player_dict[action.target].character, Demon))
         # If it works
         if it_works:
+            self._kill_player(self.player_dict[action.target])
             self._broadcast_info(self._all_players(), f"{player.name} has used their slayer power on {action.target} and killed them.")
         # If it doesn't work
         else:
             self._broadcast_info(self._all_players(), f"{player.name} has used their slayer power on {action.target} and nothing happened.")
 
         return it_works
+    
+    def _send_message(self, from_player: Player, recipients: list[str], message: str) -> None:
+        recipient_str = ", ".join([name for name in recipients])
+        self._broadcast_info(recipients, f"Message from {from_player.name} to {recipient_str}: {message}")
 
-    def _run_day_phase(self) -> None:
+    def _run_nomination(self, player: Player, action: NominationAction) -> None:
+        nominee = self.player_dict[action.nominee]
+        if player.used_nomination or nominee.nominated_today:
+            return
+        
+        nominee.nominated_today = True
+        player.used_nomination = True
+
+        self._broadcast_info(self._all_players(), f"{player.name} has nominated {nominee.name} for execution. Their reason is: {action.reason}")
+
+        if self.chopping_block:
+            prev_count, _ = self.chopping_block
+            required_to_tie = prev_count
+            required_to_nominate = prev_count + 1
+        else:
+            living_count = sum(1 for player in self.players if player.is_alive)
+            required_to_nominate = living_count // 2 if living_count % 2 == 0 else living_count // 2 + 1
+            required_to_tie = None
+
+        count = 0
+        previous_votes: list[tuple[str, Vote]] = []
+        for player in self.players:
+            if player.is_alive:
+                vote = player.vote(
+                    nominee=nominee.name,
+                    public_game_state=self._get_public_game_state(),
+                    current_tally=count,
+                    required_to_tie=required_to_tie,
+                    required_to_nominate=required_to_nominate,
+                    previous_votes=previous_votes
+                )
+                previous_votes.append((player.name, vote))
+                if vote == Vote.YES:
+                    count += 1
+
+        if count >= required_to_nominate:
+            self.chopping_block = (count, nominee)
+            self._broadcast_info(self._all_players(), f"Storyteller: {nominee.name} has been nominated for execution with {count} votes. They will die at the end of the day if no one else is nominated. Vote record: {format_vote_history(previous_votes)}")
+        elif required_to_tie is not None and count == required_to_tie:
+            self.chopping_block = None
+            self._broadcast_info(self._all_players(), f"Storyteller: {nominee.name} has received {count} votes. This ties the previous nominee. The chopping block is now empty. Vote record: {format_vote_history(previous_votes)}")
+
+
+    def _run_day_phase(self) -> Alignment | None:
         self.current_phase = Phase.DAY
         for player in self.players:
             player.start_of_day()
@@ -170,11 +225,14 @@ class Game:
                 action: DayAction = player.day_action()
 
                 if isinstance(action, MessageAction):
-                    self._broadcast_info(action.recipients, f"Message {player.name} to {action.recipients}: {action.message}")
+                    self._send_message(player, action.recipients, action.message)
                 elif isinstance(action, NominationAction):
-                    self._broadcast_info(self._all_players(), f"{player.name} has nominated {action.player} for execution.")
+                    self._run_nomination(player, action)
                 elif isinstance(action, SlayerPowerAction):
-                    self._slayer_power(action)
+                    if self._slayer_power(action):
+                        game_over, alignment = self._game_over()
+                        if game_over:
+                            return alignment
                 elif isinstance(action, NoAction):
                     pass
 

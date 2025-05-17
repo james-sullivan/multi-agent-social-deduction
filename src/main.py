@@ -6,7 +6,7 @@ import argparse
 from dotenv import load_dotenv
 import http.client as http_client
 
-from src.agent_old import Agent, Role
+from src.player import Agent, Role
 from game import Game
 
 # Load environment variables

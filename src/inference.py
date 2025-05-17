@@ -2,6 +2,8 @@ from anthropic import Anthropic
 from anthropic.types import MessageParam, ToolParam
 from typing import Optional, Dict, Any, List, Union, TypedDict, cast
 
+# Initialize the Anthropic client once at module level
+client = Anthropic()
 
 class CreateMessageArgs(TypedDict, total=False):
     model: str
@@ -13,7 +15,6 @@ class CreateMessageArgs(TypedDict, total=False):
 
 
 def request_llm_response(
-    client: Anthropic,
     system_prompt: str,
     user_message: str,
     model: str = "claude-3-5-haiku-20240307",
@@ -24,7 +25,6 @@ def request_llm_response(
     Send a request to the LLM and return the response.
     
     Args:
-        client: Anthropic client
         system_prompt: System prompt with context
         user_message: User message content
         model: Model to use
