@@ -1,17 +1,15 @@
 from __future__ import annotations
 from game import Alignment, Vote, PublicGameState
 from characters import Character
-from typing import Optional, List, Dict, Any, cast, TypedDict
+from typing import Optional, List
 import json
-import os
-from anthropic import Anthropic, APIStatusError
-from anthropic.types import Message, MessageParam, ToolParam, ToolChoiceParam
+from anthropic.types import ToolParam
 from player_tools import MESSAGE_TOOL, SLAYER_TOOL, NOMINATION_TOOL
 from enum import Enum
-from prompts import BOTC_RULES, TROUBLE_BREWING_SCRIPT
+from prompts import BOTC_RULES, TROUBLE_BREWING_CHARACTERS
 from dataclasses import dataclass
 from src.inference import request_llm_response
-from characters import Outsider, Townsfolk, Demon, Minion
+
 class DayActions(Enum):
     MESSAGE = "message"
     NOMINATION = "nomination"
@@ -58,7 +56,7 @@ class NoAction(DayAction):
 
 
 class Player:
-    def __init__(self, name: str, alignment: Alignment, character: Character) -> None:
+    def __init__(self, name: str, alignment: Alignment, character: Character, drunk_character: Character | None = None) -> None:
         self.name: str = name
         self.alive: bool = True
         self.history: list[str] = []
@@ -70,6 +68,7 @@ class Player:
         self.used_nomination: bool = False
         self.nominated_today: bool = False
         self.used_dead_vote: bool = False
+        self.drunk_character: Character | None = None
 
     def start_of_day(self) -> None:
         self.used_nomination = False
@@ -85,9 +84,15 @@ class Player:
             return
         
         system_prompt = self._get_player_system_prompt(public_game_state)
-        user_message = "It's time to update your notes using the history events. After this update your history will be cleared so make sure that all of the important information is inlcuded in your notes."
+        user_message = "It's time to update your notes using your history of events. You can find your notes in between <notes><\notes> tags and history in between <history><\history> tags. After this update your history will be cleared so make sure that all of the important information is included in your notes. Only give me your updated notes, no other text and use bullet points. You only need to note information that is not in the rest of your system prompt."
         
-        self.notes = request_llm_response(system_prompt, user_message)
+        response = request_llm_response(system_prompt, user_message)
+        if isinstance(response, str):
+            self.notes = response
+        else:
+            self.notes = "No notes so far."
+
+        self.history = []
 
     def vote(self,
              nominee: str,
@@ -168,23 +173,39 @@ Respond with only 'YES' or 'NO'.
         game_state = "Here is the publicly available player state in the order they are sitting in:" + ", ".join([json.dumps(player) for player in public_game_state.player_state])
         seating_explanation = f"The seating order is important for several game mechanics such as voting order and character abilities. The seat adjacency wraps from the first to the last. For example, {public_game_state.player_state[0]['name']} is adjacent to {public_game_state.player_state[-1]['name']} and {public_game_state.player_state[1]['name']}."
 
-        system_prompt = f"""{BOTC_RULES}
+        system_prompt = f"""<rules>
+{BOTC_RULES}
+<\rules>
 
-{TROUBLE_BREWING_SCRIPT}
+<characters>
+{public_game_state.character_str}
+<\characters>
 
-You are a player. Your name is {self.name}. Your character is {self.character.value}. You are on the {self.alignment.name} team. 
+<player_state>
+You are a player.
+Your name is {self.name}.
+Your character is {self.character.value if self.drunk_character is None else self.drunk_character.value}. 
+You are on the {self.alignment.name} team. 
 You are {'alive' if self.alive else f'dead and you have {'not' if not self.used_dead_vote else ''} used your dead vote'}. 
 You have {"not" if self.used_nomination else ""} nominated today. 
 You have {self.messages_left} messages left that you can send today. 
+<\player_state>
+
+<game_state>
 It is round {public_game_state.round_number} and the current phase is {public_game_state.current_phase}.
 {game_state}
 {seating_explanation}
+<\game_state>
 
 Here are your notes summarizing the previous rounds:
+<notes>
 {self.notes}
+<\notes>
 
 Here's your history of the current round from oldest to newest:
-{"\n".join(self.history)}"""
+<history>
+{"\n".join(self.history)}
+<\history>"""
 
         return system_prompt
     
@@ -246,3 +267,24 @@ Here's your history of the current round from oldest to newest:
                 
         # Default if no action was taken or there was an error
         return NoAction(f"{self.name} did not choose a valid action")
+    
+    def night_player_choice(self, public_game_state: PublicGameState, prompt: str) -> list[str]:
+        system_prompt = self._get_player_system_prompt(public_game_state)
+        user_message = f"{prompt}\nProvide an explaination of your choice between <thinking> tags, then your choice or choices between <names> tags and seperated by commas. e.g. <names>Bruce, Jacob</names>"
+
+        response = request_llm_response(
+            system_prompt=system_prompt,
+            user_message=user_message,
+            tools=[]
+        )
+
+        # Extract player names using regex
+        import re
+        if isinstance(response, str):
+            name_match = re.search(r'<names>(.*?)</names>', response, re.DOTALL)
+            if name_match:
+                names_str = name_match.group(1)
+                return [name.strip() for name in names_str.split(',')]
+        
+        return []
+        

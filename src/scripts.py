@@ -1,0 +1,57 @@
+from dataclasses import dataclass
+from characters import Character, Townsfolk, Outsider, Minion, Demon
+from prompts import TROUBLE_BREWING_CHARACTERS
+
+@dataclass
+class Script:
+    townsfolk: list[Townsfolk]
+    outsiders: list[Outsider]
+    minions: list[Minion]
+    demons: list[Demon]
+    night_order: list[Character]
+    character_str: str
+
+TROUBLE_BREWING = Script(
+    townsfolk=[Townsfolk.WASHERWOMAN, Townsfolk.LIBRARIAN, Townsfolk.INVESTIGATOR, Townsfolk.CHEF, Townsfolk.EMPATH, Townsfolk.FORTUNETELLER, Townsfolk.UNDERTAKER, Townsfolk.MONK, Townsfolk.RAVENKEEPER, Townsfolk.VIRGIN, Townsfolk.SLAYER, Townsfolk.SOLDIER, Townsfolk.MAYOR],
+    outsiders=[Outsider.BUTLER, Outsider.SAINT, Outsider.RECLUSE, Outsider.DRUNK],
+    minions=[Minion.POISONER, Minion.SPY, Minion.BARON, Minion.SCARLET_WOMAN],
+    demons=[Demon.IMP],
+    first_night_order=[Minion.POISONER, Minion.SPY, Townsfolk.WASHERWOMAN, Townsfolk.LIBRARIAN, Townsfolk.INVESTIGATOR, Townsfolk.CHEF, Townsfolk.EMPATH, Townsfolk.FORTUNETELLER, Outsider.BUTLER],
+    other_night_order=[Minion.POISONER, Townsfolk.MONK, Townsfolk.SPY, Demon.IMP, Townsfolk.RAVENKEEPER, Townsfolk.UNDERTAKER, Townsfolk.EMPATH, Townsfolk.FORTUNETELLER, Outsider.BUTLER],
+    character_str=TROUBLE_BREWING_CHARACTERS
+)
+
+TROUBLE_BREWING_CHARACTERS = '''
+The following is the complete list of all characters that can be in the game.
+## Townsfolk (Good)
+• Washerwoman: Starts knowing that 1 of 2 players is a particular Townsfolk
+• Librarian: Starts knowing that 1 of 2 players is a particular Outsider (or that zero are in play)
+• Investigator: Starts knowing that 1 of 2 players is a particular Minion
+• Chef: Starts knowing how many adjacent pairs of Evil players there are. (If three evil players are adjacent in a line, there are two pairs)
+• Empath: Each night, learns how many of their 2 alive neighbors are Evil
+• Fortune Teller: Each night, chooses 2 players and learns if either is a Demon. There is a good player who registers as a Demon.
+• Undertaker: Each night (except the first), learns which character died by execution that day
+• Monk: Each night (except the first), chooses a player to protect from the Demon's attack
+• Ravenkeeper: If dies at night, wakes to choose a player and learn their character
+• Virgin: The first time nominated, if the nominator is a Townsfolk, the nominator dies immediately and the nomination continues.
+• Slayer: Once per game during the day, publicly choose a player; if they're the Demon, they die
+• Mayor: If only 3 players live and no execution occurs, their team wins; if they die at night, the Storyteller might choose another player to die instead
+• Soldier: Cannot be killed by the Demon
+
+## Outsiders (Good)
+• Butler: Each night, chooses a player and can only vote if that player votes Yes before it is their turn to vote
+• Drunk: Thinks they are a Townsfolk but they are Drunk. They Storyteller will treat them as if they are the Townsfolk they think they are but their ability does not work.
+• Recluse: Might register as Evil and as a Minion or Demon, even if dead
+• Saint: If executed, their team loses
+
+## Minions (Evil)
+• Poisoner: Each night they choose a player to poison for that night and the next day
+• Spy: Each night, sees the Grimoire (contains complete information about the game state); might register as Good and as a Townsfolk or Outsider
+• Scarlet_Woman: If 5+ players are alive and the Demon dies, becomes the Demon
+• Baron: Adds two extra Outsiders to the game during setup. The player count stays the same and Townsfolk are removed to make room
+
+## Demon (Evil)
+• Imp: Each night (except the first), chooses a player to kill; if they kill themselves, the Storyteller picks a Minion to become the new Imp
+'''
+
+

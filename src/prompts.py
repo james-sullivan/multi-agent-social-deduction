@@ -18,7 +18,7 @@ During the day players can send messages to each other to persuade, strategize, 
 During the night the Storyteller will secretly give information to players based on their character's ability or allow them to secretly use their ability. All information at night is secret and only the player receiving the information or using their ability knows about it.
 
 ## Nomination for Execution
-Towards the end of the day the Storyteller will allow players to nomiate each other for execution. Each living player can only nominate one person per day and each person may only be nominated once per day. You can nominate any player including yourself or any other living or dead player.
+Towards the end of the day the Storyteller will allow players to nominate each other for execution. Each living player can only nominate one person per day and each person may only be nominated once per day. You can nominate any player including yourself or any other living or dead player.
 
 During a nomination each player will vote starting with the player who is being nominated and proceeding left to right until all players have voted. Players can vote yes or no. When each player votes, they first get to see the votes of the players who voted before them. 
 
@@ -39,41 +39,20 @@ The Evil team is made up of one Demon and one to three Minions. The Demon is the
 Dead players are still in the game and can still talk to other players, but they no longer have their character's ability, they cannot nominate players for execution, and they only get one vote for the rest of the game.
 
 ## Being Poisoned and Drunk
-Posioned and Drunk are status effects that can be applied to players. They function the exact same way and a player will not know if they are Poisoned or Drunk. If a player is Poisoned or Drunk their character's ability will not work and any information that they recieve from the Storyteller may be false.
+Poisoned and Drunk are status effects that can be applied to players. They function the exact same way and a player will not know if they are Poisoned or Drunk. If a player is Poisoned or Drunk their character's ability will not work and any information that they receive from the Storyteller may be false.
 
 ## Registers
-The rules and characters abilites sometimes talk about a player "registering" as good/evil, a particuler role, or a particular character. This means that the game mechanics will treat them as the character, alignment, or role they are registering as, even if they are not that character, alignment, or role. For example, if a player "might" register as evil, then the Storyteller can decide to show another player a demon character when another player uses their ability to check what character they are.
+The rules and characters abilities sometimes talk about a player "registering" as good/evil, a particular role, or a particular character. This means that the game mechanics will treat them as the character, alignment, or role they are registering as, even if they are not that character, alignment, or role. For example, if a player "might" register as evil, then the Storyteller can decide to show another player a demon character when another player uses their ability to check what character they are.
 '''
 
-TROUBLE_BREWING_SCRIPT = '''
-The following is the complete list of all characters that can be in the game.
-## Townsfolk (Good)
-• Washerwoman: Starts knowing that 1 of 2 players is a particular Townsfolk
-• Librarian: Starts knowing that 1 of 2 players is a particular Outsider (or that zero are in play)
-• Investigator: Starts knowing that 1 of 2 players is a particular Minion
-• Chef: Starts knowing how many adjacent pairs of Evil players there are. (If three evil players are adjacent in a line, there are two pairs)
-• Empath: Each night, learns how many of their 2 alive neighbors are Evil
-• Fortune Teller: Each night, chooses 2 players and learns if either is a Demon. There is a good player who registers as a Demon.
-• Undertaker: Each night (except the first), learns which character died by execution that day
-• Monk: Each night (except the first), chooses a player to protect from the Demon's attack
-• Ravenkeeper: If dies at night, wakes to choose a player and learn their character
-• Virgin: The first time nominated, if the nominator is a Townsfolk, the nominator dies immediately and the nomination continues.
-• Slayer: Once per game during the day, publicly choose a player; if they're the Demon, they die
-• Mayor: If only 3 players live and no execution occurs, their team wins; if they die at night, the Storyteller might choose another player to die instead
-• Soldier: Cannot be killed by the Demon
+POISONER_PROMPT = '''Choose the name of one player to poison for the night and next day.'''
 
-## Outsiders (Good)
-• Butler: Each night, chooses a player and can only vote if that player votes Yes before it is their turn to vote
-• Drunk: Thinks they are a Townsfolk but they are Drunk. They Storyteller will treat them as if they are the Townsfolk they think they are but their ability does not work.
-• Recluse: Might register as Evil and as a Minion or Demon, even if dead
-• Saint: If executed, their team loses
+FORTUNETELLER_PROMPT = '''Choose 2 players to learn if either is the Demon.'''
 
-## Minions (Evil)
-• Poisoner: Each night they choose a player to poison for that night and the next day
-• Spy: Each night, sees the Grimoire (contains complete informaiton about the game state); might register as Good and as a Townsfolk or Outsider
-• Scarlet_Woman: If 5+ players are alive and the Demon dies, becomes the Demon
-• Baron: Adds two extra Outsiders to the game during setup. The player count stays the same and Townsfolk are removed to make room
+MONK_PROMPT = '''Choose a player to protect from the Demon's attack tonight.'''
 
-## Demon (Evil)
-• Imp: Each night (except the first), chooses a player to kill; if they kill themselves, the Storyteller picks a Minion to become the new Imp
-'''
+RAVENKEEPER_PROMPT = '''Choose a player to learn their character.'''
+
+BUTLER_PROMPT = '''Choose a player, if they have voted for the nominee.'''
+
+IMP_PROMPT = '''Choose a player to kill tonight.'''
