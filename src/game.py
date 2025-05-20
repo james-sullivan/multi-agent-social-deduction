@@ -8,7 +8,7 @@ from src.characters import Character, Townsfolk, Outsider, Demon, Minion
 from src.utils import format_vote_history
 from src.scripts import Script
 from src.prompts import POISONER_PROMPT, FORTUNETELLER_PROMPT, MONK_PROMPT, RAVENKEEPER_PROMPT, IMP_PROMPT, BUTLER_PROMPT
-
+from src.characters import ReminderTokens
 logger = logging.getLogger(__name__)
 
 class Vote(Enum):
@@ -64,16 +64,21 @@ class Game:
             for character in characters:
                 self._players.append(Player(name=names.pop(), character=character))
         else:
-            for _ in range(outsider_count):
-                self._players.append(Player(name=names.pop(), character=outsiders.pop()))
-
-            for _ in range(townsfolk_count):
-                self._players.append(Player(name=names.pop(), character=townsfolk.pop()))
+            self._players.append(Player(name=names.pop(), character=demons.pop()))
 
             for _ in range(minion_count):
                 self._players.append(Player(name=names.pop(), character=minions.pop()))
+                if self._players[-1].character == Minion.BARON:
+                    outsider_count += 2
+                    townsfolk_count = max(townsfolk_count - 2, 0)
 
-            self._players.append(Player(name=names.pop(), character=demons.pop()))
+            for _ in range(outsider_count):
+                self._players.append(Player(name=names.pop(), character=outsiders.pop()))
+                if self._players[-1].character == Outsider.DRUNK:
+                    self._players[-1].drunk_character = random.choice(townsfolk)
+
+            for _ in range(townsfolk_count):
+                self._players.append(Player(name=names.pop(), character=townsfolk.pop()))
 
         random.shuffle(self._players)
 
@@ -81,12 +86,45 @@ class Game:
         self._player_dict: dict[str, Player] = {player.name: player for player in self._players}
         self._character_dict: dict[Character, Player] = {player.character: player for player in self._players}
 
+        self._reminder_tokens: dict[Character, dict[ReminderTokens, Player]] = {}
         self._round_number: int = 1
         self._current_phase: Phase = Phase.NIGHT
         self._drunk_and_poisoned: dict[Player, list[Player]] = {}
         self._chopping_block: tuple[int, Player] | None = None
         self._nominations_open: bool = False
         self._script: Script = script
+
+        # Fortuneteller setup
+        if Townsfolk.FORTUNETELLER in self._character_dict:
+            good_players = [player for player in self._players if (self._get_player_alignment(player) == Alignment.GOOD)]
+            self._reminder_tokens[Character.FORTUNETELLER] = {ReminderTokens.RED_HERRING: random.choice(good_players)}
+
+        # Investigator setup
+        if Townsfolk.INVESTIGATOR in self._character_dict:
+            minion_players = [player for player in self._players if isinstance(player.character, Minion)]
+            non_minion_players = [player for player in self._players if not isinstance(player.character, Minion)]
+            self._reminder_tokens[Character.INVESTIGATOR] = {
+                ReminderTokens.INVESTIGATOR_MINION: random.choice(minion_players),
+                ReminderTokens.INVESTIGATOR_OTHER: random.choice(non_minion_players)
+            }
+
+        # Librarian setup
+        if Townsfolk.LIBRARIAN in self._character_dict:
+            outsider_players = [player for player in self._players if isinstance(player.character, Outsider)]
+            non_outsider_players = [player for player in self._players if not isinstance(player.character, Outsider)]
+            self._reminder_tokens[Character.LIBRARIAN] = {
+                ReminderTokens.LIBRARIAN_OUTSIDER: random.choice(outsider_players),
+                ReminderTokens.LIBRARIAN_OTHER: random.choice(non_outsider_players)
+            }
+
+        # Washerwoman setup
+        if Townsfolk.WASHERWOMAN in self._character_dict:
+            townsfolk_players = [player for player in self._players if isinstance(player.character, Townsfolk)]
+            non_townsfolk_players = [player for player in self._players if not isinstance(player.character, Townsfolk)]
+            self._reminder_tokens[Character.WASHERWOMAN] = {
+                ReminderTokens.WASHERWOMAN_TOWNSFOLK: random.choice(townsfolk_players),
+                ReminderTokens.WASHERWOMAN_OTHER: random.choice(non_townsfolk_players)
+            }
 
     def _get_player_alignment(self, player: Player) -> Alignment:
         if player.character == Outsider.RECLUSE:
@@ -106,8 +144,7 @@ class Game:
 
     def _get_public_game_state(self) -> PublicGameState:
         """
-        Returns the public game state that can be shared with all players.
-        This includes information about all players without revealing their roles.
+        Returns all of the current public information about the game state.
         """
         player_state = []
         
@@ -197,26 +234,55 @@ class Game:
                 self._player_dict[recipient].give_info(info)
 
     def _washerwoman_power(self, player: Player) -> None:
-        player_choice = player.night_player_choice(self._get_public_game_state(), WASHERWOMAN_PROMPT)
+        # Get the players from reminder tokens
+        townsfolk_player = self._reminder_tokens[Character.WASHERWOMAN][ReminderTokens.WASHERWOMAN_TOWNSFOLK]
+        other_player = self._reminder_tokens[Character.WASHERWOMAN][ReminderTokens.WASHERWOMAN_OTHER]
+        townsfolk_character = townsfolk_player.character
         if self._is_drunk_or_poisoned(player):
-            # If drunk/poisoned, give false info
-            random_player = random.choice(self._players)
-            random_townsfolk = random.choice([p for p in self._players if isinstance(p.character, Townsfolk)])
-            self._broadcast_info(player, f"Storyteller: {random_player.name} is the {random_townsfolk.character.value}")
-        else:
-            # Find a random townsfolk player and tell the washerwoman about them
-            townsfolk_players = [p for p in self._players if isinstance(p.character, Townsfolk)]
-            if townsfolk_players:
-                chosen_player = random.choice(townsfolk_players)
-                self._broadcast_info(player, f"Storyteller: {chosen_player.name} is the {chosen_player.character.value}")
-            else:
-                self._broadcast_info(player, "Storyteller: There are no Townsfolk in the game")
+            # Pick two random players and a random townsfolk character
+            available_players = [p for p in self._players if p is not townsfolk_player and p is not other_player]
+            random_players = random.sample(available_players, 2)
+            townsfolk_character = random.choice(self._script.townsfolk)
+            townsfolk_player, other_player = random_players[0], random_players[1]
+            
+        self._broadcast_info(
+            player,
+            f"Storyteller: One of these players is the {townsfolk_character.value}: {townsfolk_player.name}, {other_player.name}"
+        )
 
     def _librarian_power(self, player: Player) -> None:
-        pass
+        # Get the players from reminder tokens
+        outsider_player = self._reminder_tokens[Character.LIBRARIAN][ReminderTokens.LIBRARIAN_OUTSIDER]
+        other_player = self._reminder_tokens[Character.LIBRARIAN][ReminderTokens.LIBRARIAN_OTHER]
+        outsider_character = outsider_player.character
+        if self._is_drunk_or_poisoned(player):
+            # Pick two random players and a random outsider character
+            available_players = [p for p in self._players if p is not outsider_player and p is not other_player]
+            random_players = random.sample(available_players, 2)
+            outsider_character = random.choice(self._script.outsiders)
+            outsider_player, other_player = random_players[0], random_players[1]
+            
+        self._broadcast_info(
+            player,
+            f"Storyteller: One of these players is the {outsider_character.value}: {outsider_player.name}, {other_player.name}"
+        )
 
     def _investigator_power(self, player: Player) -> None:
-        pass
+        # Get the players from reminder tokens
+        minion_player = self._reminder_tokens[Character.INVESTIGATOR][ReminderTokens.INVESTIGATOR_MINION]
+        other_player = self._reminder_tokens[Character.INVESTIGATOR][ReminderTokens.INVESTIGATOR_OTHER]
+        minion_character = minion_player.character
+        if self._is_drunk_or_poisoned(player):
+            # Pick two random players and a random minion character
+            available_players = [p for p in self._players if p is not minion_player and p is not other_player]
+            random_players = random.sample(available_players, 2)
+            minion_character = random.choice(self._script.minions)
+            minion_player, other_player = random_players[0], random_players[1]
+            
+        self._broadcast_info(
+            player,
+            f"Storyteller: One of these players is the {minion_character.value}: {minion_player.name}, {other_player.name}"
+        )
     
     def _chef_power(self, player: Player) -> None:
         evil_pairs = 0
@@ -267,6 +333,11 @@ class Game:
             if len(player_choice) != 1:
                 raise ValueError("Poisoner can only choose one player")
             
+            # Remove the posion from any other player
+            for player_list in self._drunk_and_poisoned.values():
+                if player in player_list:
+                    player_list.remove(player)
+
             choice = player_choice[0]
             self._drunk_and_poisoned[choice].append(player)
             
@@ -277,7 +348,8 @@ class Game:
             logger.error(f"Player {player.name} tried to posion {player_choice}. len(player_choice) != 1")
 
     def _spy_power(self, player: Player) -> None:
-        pass
+        player_strings = [f"{player.name} ({player.character.value})" for player in self._players if player.is_alive]
+        poisoned_strings = [f"{player.name} is poisoned by {poisoner.name}" for player, poisoners in self._drunk_and_poisoned.items() for poisoner in poisoners]
     
     def _monk_power(self, player: Player) -> None:
         pass

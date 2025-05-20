@@ -2,7 +2,16 @@
 from enum import Enum
 import random
 from game import Alignment
-
+class ReminderTokens(Enum):
+    IMP_DEAD = "Imp_Dead"
+    RED_HERRING = "Fortuneteller_Red_Herring"
+    WASHERWOMAN_TOWNSFOLK = "Washerwoman_Townsfolk"
+    WASHERWOMAN_OTHER = "Washerwoman_Other"
+    LIBRARIAN_OUTSIDER = "Librarian_Outsider"
+    LIBRARIAN_OTHER = "Librarian_Other"
+    INVESTIGATOR_MINION = "Investigator_Minion"
+    INVESTIGATOR_OTHER = "Investigator_Other"
+    
 class Character(Enum):
     """Base enum for all characters - empty by design"""
     pass
