@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 from characters import Character, Townsfolk, Outsider, Minion, Demon
-from prompts import TROUBLE_BREWING_CHARACTERS
 
 @dataclass
 class Script:
@@ -8,18 +7,9 @@ class Script:
     outsiders: list[Outsider]
     minions: list[Minion]
     demons: list[Demon]
-    night_order: list[Character]
+    first_night_order: list[Character]
+    other_night_order: list[Character]
     character_str: str
-
-TROUBLE_BREWING = Script(
-    townsfolk=[Townsfolk.WASHERWOMAN, Townsfolk.LIBRARIAN, Townsfolk.INVESTIGATOR, Townsfolk.CHEF, Townsfolk.EMPATH, Townsfolk.FORTUNETELLER, Townsfolk.UNDERTAKER, Townsfolk.MONK, Townsfolk.RAVENKEEPER, Townsfolk.VIRGIN, Townsfolk.SLAYER, Townsfolk.SOLDIER, Townsfolk.MAYOR],
-    outsiders=[Outsider.BUTLER, Outsider.SAINT, Outsider.RECLUSE, Outsider.DRUNK],
-    minions=[Minion.POISONER, Minion.SPY, Minion.BARON, Minion.SCARLET_WOMAN],
-    demons=[Demon.IMP],
-    first_night_order=[Minion.POISONER, Minion.SPY, Townsfolk.WASHERWOMAN, Townsfolk.LIBRARIAN, Townsfolk.INVESTIGATOR, Townsfolk.CHEF, Townsfolk.EMPATH, Townsfolk.FORTUNETELLER, Outsider.BUTLER],
-    other_night_order=[Minion.POISONER, Townsfolk.MONK, Townsfolk.SPY, Demon.IMP, Townsfolk.RAVENKEEPER, Townsfolk.UNDERTAKER, Townsfolk.EMPATH, Townsfolk.FORTUNETELLER, Outsider.BUTLER],
-    character_str=TROUBLE_BREWING_CHARACTERS
-)
 
 TROUBLE_BREWING_CHARACTERS = '''
 The following is the complete list of all characters that can be in the game.
@@ -53,5 +43,15 @@ The following is the complete list of all characters that can be in the game.
 ## Demon (Evil)
 • Imp: Each night (except the first), chooses a player to kill; if they kill themselves, the Storyteller picks a Minion to become the new Imp
 '''
+
+TROUBLE_BREWING = Script(
+    townsfolk=[Townsfolk.WASHERWOMAN, Townsfolk.LIBRARIAN, Townsfolk.INVESTIGATOR, Townsfolk.CHEF, Townsfolk.EMPATH, Townsfolk.FORTUNETELLER, Townsfolk.UNDERTAKER, Townsfolk.MONK, Townsfolk.RAVENKEEPER, Townsfolk.VIRGIN, Townsfolk.SLAYER, Townsfolk.SOLDIER, Townsfolk.MAYOR],
+    outsiders=[Outsider.BUTLER, Outsider.SAINT, Outsider.RECLUSE, Outsider.DRUNK],
+    minions=[Minion.POISONER, Minion.SPY, Minion.BARON, Minion.SCARLET_WOMAN],
+    demons=[Demon.IMP],
+    first_night_order=[Minion.POISONER, Minion.SPY, Townsfolk.WASHERWOMAN, Townsfolk.LIBRARIAN, Townsfolk.INVESTIGATOR, Townsfolk.CHEF, Townsfolk.EMPATH, Townsfolk.FORTUNETELLER, Outsider.BUTLER],
+    other_night_order=[Minion.POISONER, Townsfolk.MONK, Minion.SPY, Demon.IMP, Townsfolk.RAVENKEEPER, Townsfolk.UNDERTAKER, Townsfolk.EMPATH, Townsfolk.FORTUNETELLER, Outsider.BUTLER],
+    character_str=TROUBLE_BREWING_CHARACTERS
+)
 
 

@@ -1,9 +1,8 @@
 # from roles import Townsfolk, Outsider, Minion, Demon, Role
 from enum import Enum
 import random
-from game import Alignment
+from game_enums import Alignment
 class ReminderTokens(Enum):
-    IMP_DEAD = "Imp_Dead"
     RED_HERRING = "Fortuneteller_Red_Herring"
     WASHERWOMAN_TOWNSFOLK = "Washerwoman_Townsfolk"
     WASHERWOMAN_OTHER = "Washerwoman_Other"
@@ -11,7 +10,11 @@ class ReminderTokens(Enum):
     LIBRARIAN_OTHER = "Librarian_Other"
     INVESTIGATOR_MINION = "Investigator_Minion"
     INVESTIGATOR_OTHER = "Investigator_Other"
-    
+    MONK_PROTECTED = "Monk_Protected"
+    RAVENKEEPER_WOKEN = "Ravenkeeper_Woken"
+    IMP_KILLED = "Imp_Killed"
+    UNDERTAKER_EXECUTED = "Undertaker_Executed"
+    BUTLER_MASTER = "Butler_Master"
 class Character(Enum):
     """Base enum for all characters - empty by design"""
     pass

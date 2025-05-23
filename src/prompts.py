@@ -53,6 +53,6 @@ MONK_PROMPT = '''Choose a player to protect from the Demon's attack tonight.'''
 
 RAVENKEEPER_PROMPT = '''Choose a player to learn their character.'''
 
-BUTLER_PROMPT = '''Choose a player, if they have voted for the nominee.'''
+BUTLER_PROMPT = '''Choose a player to be your master. Tomorrow during voting, you may only vote if your master votes first. You cannot choose yourself.'''
 
 IMP_PROMPT = '''Choose a player to kill tonight.'''

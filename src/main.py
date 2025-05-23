@@ -1,16 +1,17 @@
 import os
 import logging
 import random
-import yaml
 import argparse
 from dotenv import load_dotenv
 import http.client as http_client
 
-from src.player import Agent, Role
+from scripts import Script, TROUBLE_BREWING
 from game import Game
+from game_enums import Alignment
+from game_events import EventType
 
-# Load environment variables
-load_dotenv()
+# Load environment variables from parent directory
+load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 
 # Create logger
 logger = logging.getLogger(__name__)
@@ -24,7 +25,7 @@ def configure_logging(debug=False):
         level=log_level,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         handlers=[
-            logging.FileHandler("werewolf_game.log")
+            logging.FileHandler("blood_on_the_clocktower.log")
         ]
     )
     
@@ -50,91 +51,104 @@ def configure_logging(debug=False):
         urllib3_logger = logging.getLogger("urllib3")
         urllib3_logger.setLevel(logging.WARNING)
 
-def create_players(num_villagers=3, num_werewolves=2, has_seer=True, debug=False):
-    """Create a set of players for the game"""
-    players = {}
-    
-    # Generate player names
-    name_options = ["Alex", "Blake", "Casey", "Dana", "Emerson", "Finley", 
-                   "Gray", "Harper", "Indigo", "Jordan", "Kai", "Logan"]
-    random.shuffle(name_options)
-    
-    # Assign roles
-    total_players = num_villagers + num_werewolves + (1 if has_seer else 0)
-    if total_players > len(name_options):
-        raise ValueError(f"Too many players requested. Maximum is {len(name_options)}")
-    
-    # Assign werewolves
-    for _ in range(num_werewolves):
-        name = name_options.pop()
-        players[name] = Agent(name, Role.WEREWOLF, debug=debug)
-        logger.info(f"Created werewolf: {name}")
-    
-    # Assign seer if requested
-    if has_seer:
-        name = name_options.pop()
-        players[name] = Agent(name, Role.SEER, debug=debug)
-        logger.info(f"Created seer: {name}")
-    
-    # Assign villagers
-    for i in range(num_villagers):
-        name = name_options.pop()
-        players[name] = Agent(name, Role.VILLAGER, debug=debug)
-        logger.info(f"Created villager: {name}")
-    
-    return players
-
 def load_config(config_name="default"):
-    """Load game configuration from config.yaml"""
-    try:
-        with open("config.yaml", "r") as f:
-            configs = yaml.safe_load(f)
-        
-        if config_name not in configs:
-            logger.warning(f"Config '{config_name}' not found. Using default.")
-            config_name = "default"
-            
-        return configs[config_name]
-    except Exception as e:
-        logger.error(f"Error loading config: {e}")
-        logger.info("Using fallback configuration")
-        return {
-            "num_villagers": 3,
-            "num_werewolves": 2,
-            "has_seer": True,
-            "max_days": 10
-        }
+    """Load simple game configuration"""
+    # For the simple 5-player game, we just need basic settings
+    return {
+        "max_rounds": 6,
+        "random_seed": 42  # Fixed seed for consistent games
+    }
+
+def create_game(config, debug=False):
+    """Create a simple 5-player Blood on the Clocktower game with hardcoded characters"""
+    
+    # Import character types
+    from characters import Townsfolk, Minion, Demon
+    
+    # Define the 5 characters for our simple game
+    characters = [
+        Demon.IMP,           # The evil demon who kills at night
+        Minion.POISONER,     # Can poison players to disable their abilities
+        Townsfolk.MAYOR,     # Can win if 3 players remain with no execution
+        Townsfolk.EMPATH,    # Learns how many evil neighbors they have
+        Townsfolk.SLAYER,    # Can attempt to slay the demon during the day
+    ]
+    
+    print("🎭 Starting a Simple 5-Player Blood on the Clocktower Game!")
+    print("=" * 60)
+    print("Characters in play:")
+    print("- 👹 Imp (Demon): Kills each night")
+    print("- 🧪 Poisoner (Minion): Poisons abilities")
+    print("- 🏛️  Mayor (Townsfolk): Wins with 3 players + no execution")
+    print("- 💝 Empath (Townsfolk): Senses evil neighbors")
+    print("- ⚔️  Slayer (Townsfolk): Can attempt to kill the demon")
+    print("=" * 60)
+    
+    # Create game with hardcoded characters
+    game = Game(
+        script=TROUBLE_BREWING,
+        characters=characters,
+        random_seed=config.get("random_seed", 42)  # Use config seed or default to 42
+    )
+    
+    logger.info("Created simple 5-player game")
+    logger.info("Characters: Imp, Poisoner, Mayor, Empath, Slayer")
+    
+    return game
 
 def run_game(config_name="default", debug=False):
-    """Initialize and run a werewolf game"""
-    logger.info(f"Initializing new Werewolf game with config: {config_name}")
+    """Initialize and run a Blood on the Clocktower game"""
+    logger.info(f"Initializing new Blood on the Clocktower game with config: {config_name}")
     
     # Load configuration
     config = load_config(config_name)
     
-    # Create players
-    players = create_players(
-        config["num_villagers"],
-        config["num_werewolves"],
-        config["has_seer"],
-        debug=debug
-    )
-    
-    # Initialize game
-    game = Game(players)
+    # Create game
+    game = create_game(config, debug=debug)
     
     # Run the game
-    result = game.run_game(config["max_days"])
+    max_rounds = config.get("max_rounds", 6)
+    result = game.run_game(max_rounds)
     
-    logger.info(f"Game completed: {result}")
+    if result == Alignment.GOOD:
+        result_str = "Good team wins!"
+    elif result == Alignment.EVIL:
+        result_str = "Evil team wins!"
+    else:
+        result_str = "Game ended in a draw or reached maximum rounds."
     
-    return result
+    # Track game end event
+    game.event_tracker.add_event(
+        event_type=EventType.GAME_END,
+        description=result_str,
+        round_number=game._round_number,
+        phase=game._current_phase.value,
+        metadata={"result": result.value if result else "Max Rounds"}
+    )
+    
+    logger.info(f"Game completed: {result_str}")
+    
+    # Save events to JSON file
+    try:
+        game.event_tracker.save_to_json()
+        print("\n🎯 Game Summary:")
+        stats = game.event_tracker.get_game_statistics()
+        print(f"   • Total rounds: {stats['total_rounds']}")
+        print(f"   • Total events: {stats['total_events']}")
+        print(f"   • Deaths: {len(stats['deaths'])} players")
+        print(f"   • Executions: {len(stats['executions'])} players")
+        print(f"   • Nominations: {len(stats['nominations'])}")
+    except Exception as e:
+        logger.error(f"Failed to save game events: {e}")
+        print(f"⚠️  Warning: Could not save game log - {e}")
+    
+    return result_str
 
 if __name__ == "__main__":
     # Set up command line arguments
-    parser = argparse.ArgumentParser(description="Run a Werewolf game simulation")
+    parser = argparse.ArgumentParser(description="Run a simple 5-player Blood on the Clocktower game")
     parser.add_argument("--config", "-c", default="default",
-                        help="Configuration preset from config.yaml")
+                        help="Configuration name (not used, kept for compatibility)")
     parser.add_argument("--debug", "-d", action="store_true",
                         help="Enable debug mode with verbose logging including HTTP statuses")
     args = parser.parse_args()

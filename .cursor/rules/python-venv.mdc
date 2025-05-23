@@ -1,0 +1,6 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+When using python commands, you need to activate the venv first it with "source venv/bin/activate && <python command>"

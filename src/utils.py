@@ -1,4 +1,4 @@
-from src.game import Vote
+from game_enums import Vote
 
 def format_vote_history(votes: list[tuple[str, Vote]]) -> str:
     """Format a list of vote tuples into a single line string."""

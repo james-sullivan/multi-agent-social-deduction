@@ -2,8 +2,15 @@ from anthropic import Anthropic
 from anthropic.types import MessageParam, ToolParam
 from typing import Optional, Dict, Any, List, Union, TypedDict, cast
 
-# Initialize the Anthropic client once at module level
-client = Anthropic()
+# Client will be initialized lazily
+_client: Optional[Anthropic] = None
+
+def get_client() -> Anthropic:
+    """Get or create the Anthropic client."""
+    global _client
+    if _client is None:
+        _client = Anthropic()
+    return _client
 
 class CreateMessageArgs(TypedDict, total=False):
     model: str
@@ -17,7 +24,7 @@ class CreateMessageArgs(TypedDict, total=False):
 def request_llm_response(
     system_prompt: str,
     user_message: str,
-    model: str = "claude-3-5-haiku-20240307",
+    model: str = "claude-3-5-haiku-20241022",
     max_tokens: int = 1024,
     tools: Optional[List[ToolParam]] = None
 ) -> Union[str, Dict[str, Any]]:
@@ -57,6 +64,7 @@ def request_llm_response(
             args["tool_choice"] = {"type": "any"}
         
         # Make API call
+        client = get_client()
         message = client.messages.create(**cast(Dict[str, Any], args))
         
         # Handle response based on whether tools were used

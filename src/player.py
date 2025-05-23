@@ -1,14 +1,18 @@
 from __future__ import annotations
-from game import Alignment, Vote, PublicGameState
+from game_enums import Alignment, Vote
 from characters import Character
-from typing import Optional, List
+from typing import Optional, List, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from game import PublicGameState
 import json
 from anthropic.types import ToolParam
-from player_tools import MESSAGE_TOOL, SLAYER_TOOL, NOMINATION_TOOL
+from player_tools import MESSAGE_TOOL, SLAYER_TOOL, NOMINATION_TOOL, PASS_TOOL
 from enum import Enum
-from prompts import BOTC_RULES, TROUBLE_BREWING_CHARACTERS
+from prompts import BOTC_RULES
+from scripts import TROUBLE_BREWING_CHARACTERS
 from dataclasses import dataclass
-from src.inference import request_llm_response
+from inference import request_llm_response
 
 class DayActions(Enum):
     MESSAGE = "message"
@@ -64,7 +68,7 @@ class Player:
         self.alignment: Alignment = alignment
         self.character: Character = character
         self.used_once_per_game: dict[DayActions, bool] = {action: False for action in ONCE_PER_GAME_ACTIONS}
-        self.messages_left: int = 3
+        self.messages_left: int = 2
         self.used_nomination: bool = False
         self.nominated_today: bool = False
         self.used_dead_vote: bool = False
@@ -72,19 +76,19 @@ class Player:
 
     def start_of_day(self) -> None:
         self.used_nomination = False
-        self.messages_left = 3
+        self.messages_left = 2
 
     def give_info(self, info: str) -> None:
         self.history.append(info)
 
-    def summarize_history(self, public_game_state: PublicGameState) -> None:
+    def summarize_history(self, public_game_state: PublicGameState, event_tracker=None) -> None:
         """Summarize the player's history into their notes using AI."""
         if not self.history:
             self.notes = "No notes so far."
             return
         
         system_prompt = self._get_player_system_prompt(public_game_state)
-        user_message = "It's time to update your notes using your history of events. You can find your notes in between <notes><\notes> tags and history in between <history><\history> tags. After this update your history will be cleared so make sure that all of the important information is included in your notes. Only give me your updated notes, no other text and use bullet points. You only need to note information that is not in the rest of your system prompt."
+        user_message = "It's time to update your notes using your history of events. You can find your notes in between <notes></notes> tags and history in between <history></history> tags. After this update your history will be cleared so make sure that all of the important information is included in your notes. Only give me your updated notes, no other text and use bullet points. You only need to note information that is not in the rest of your system prompt."
         
         response = request_llm_response(system_prompt, user_message)
         if isinstance(response, str):
@@ -92,13 +96,25 @@ class Player:
         else:
             self.notes = "No notes so far."
 
+        # Track the notes update event if tracker is provided
+        if event_tracker:
+            from game_events import EventType
+            event_tracker.add_event(
+                event_type=EventType.NOTES_UPDATE,
+                description=f"{self.name} updated their notes",
+                round_number=public_game_state.round_number,
+                phase=public_game_state.current_phase.value,
+                participants=[self.name],
+                metadata={"character": self.character.value, "notes": self.notes}
+            )
+
         self.history = []
 
     def vote(self,
              nominee: str,
              public_game_state: PublicGameState,
              current_tally: int,
-             required_to_tie: int,
+             required_to_tie: int | None,
              required_to_nominate: int,
              previous_votes: list[tuple[str, Vote]], 
              bulter_player_choice: str | None = None) -> Vote:
@@ -172,14 +188,21 @@ Respond with only 'YES' or 'NO'.
     def _get_player_system_prompt(self, public_game_state: PublicGameState, inlcude_history: bool = True) -> str:
         game_state = "Here is the publicly available player state in the order they are sitting in:" + ", ".join([json.dumps(player) for player in public_game_state.player_state])
         seating_explanation = f"The seating order is important for several game mechanics such as voting order and character abilities. The seat adjacency wraps from the first to the last. For example, {public_game_state.player_state[0]['name']} is adjacent to {public_game_state.player_state[-1]['name']} and {public_game_state.player_state[1]['name']}."
+        
+        # Add chopping block information
+        chopping_block_info = ""
+        if public_game_state.chopping_block is not None:
+            chopping_block_info = f"\nCurrent execution nominee: {public_game_state.chopping_block.nominee} with {public_game_state.chopping_block.votes} votes. They will be executed at the end of the day unless someone else gets more votes."
+        else:
+            chopping_block_info = "\nNo one is currently nominated for execution."
 
         system_prompt = f"""<rules>
 {BOTC_RULES}
-<\rules>
+</rules>
 
 <characters>
 {public_game_state.character_str}
-<\characters>
+</characters>
 
 <player_state>
 You are a player.
@@ -189,23 +212,24 @@ You are on the {self.alignment.name} team.
 You are {'alive' if self.alive else f'dead and you have {'not' if not self.used_dead_vote else ''} used your dead vote'}. 
 You have {"not" if self.used_nomination else ""} nominated today. 
 You have {self.messages_left} messages left that you can send today. 
-<\player_state>
+</player_state>
 
 <game_state>
 It is round {public_game_state.round_number} and the current phase is {public_game_state.current_phase}.
 {game_state}
 {seating_explanation}
-<\game_state>
+{chopping_block_info}
+</game_state>
 
 Here are your notes summarizing the previous rounds:
 <notes>
 {self.notes}
-<\notes>
+</notes>
 
 Here's your history of the current round from oldest to newest:
 <history>
 {"\n".join(self.history)}
-<\history>"""
+</history>"""
 
         return system_prompt
     
@@ -227,10 +251,13 @@ Here's your history of the current round from oldest to newest:
         if self.messages_left > 0:
             available_tools.append(MESSAGE_TOOL)
 
-        # This player has nothing left to do
+        # If no meaningful tools are available, just pass automatically
         if not available_tools:
-            return NoAction("No available actions left")        
-      
+            return NoAction(f"{self.name} has no actions available and passes")
+
+        # Always add the pass tool as an option when other tools are available
+        available_tools.append(PASS_TOOL)
+
         system_prompt = self._get_player_system_prompt(public_game_state)
         user_message = "It is your turn to either take an action or pass. What do you want to do?"
         
@@ -254,7 +281,6 @@ Here's your history of the current round from oldest to newest:
             elif function_name == "nominate":
                 player = arguments.get("player", "")
                 reason = arguments.get("reason", "No reason provided")
-                self.used_nomination = True
                 return NominationAction(player, reason)
                 
             elif function_name == "slayer_power":
