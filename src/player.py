@@ -40,10 +40,14 @@ class MessageAction(DayAction):
 @dataclass
 class NominationAction(DayAction):
     nominee: str
+    private_reasoning: str
+    public_reasoning: str
     
-    def __init__(self, nominee: str, reason: str):
-        super().__init__(DayActions.NOMINATION, reason)
+    def __init__(self, nominee: str, private_reasoning: str, public_reasoning: str):
+        super().__init__(DayActions.NOMINATION, private_reasoning)  # Use private reasoning as the internal reason
         self.nominee = nominee
+        self.private_reasoning = private_reasoning
+        self.public_reasoning = public_reasoning
 
 @dataclass
 class SlayerPowerAction(DayAction):
@@ -81,16 +85,90 @@ class Player:
     def give_info(self, info: str) -> None:
         self.history.append(info)
 
+    def _get_static_system_prefix(self, character_info: str) -> str:
+        """Get the static prefix of the system prompt that can be cached.
+        
+        This includes rules, character descriptions, and player identity - 
+        content that doesn't change during the game.
+        """
+        return f"""<rules>
+{BOTC_RULES}
+</rules>
+
+<characters>
+{character_info}
+</characters>
+"""
+
+    def _get_dynamic_system_content(self, public_game_state: PublicGameState) -> str:
+        """Get the dynamic part of the system prompt that changes frequently."""
+        game_state = "Here is the publicly available player state in the order they are sitting in:" + ", ".join([json.dumps(player) for player in public_game_state.player_state])
+        seating_explanation = f"The seating order is important for several game mechanics such as voting order and character abilities. The seat adjacency wraps from the first to the last. For example, {public_game_state.player_state[0]['name']} is adjacent to {public_game_state.player_state[-1]['name']} and {public_game_state.player_state[1]['name']}."
+        
+        # Add chopping block information
+        chopping_block_info = ""
+        if public_game_state.chopping_block is not None:
+            chopping_block_info = f"Current execution nominee: {public_game_state.chopping_block.nominee} with {public_game_state.chopping_block.votes} votes. They will be executed at the end of the day unless someone else gets more votes."
+        else:
+            chopping_block_info = "No one is currently nominated for execution."
+
+        # Add nominatable players information
+        nomination_info = ""
+        if public_game_state.nominatable_players:
+            nomination_info = f"Players who can currently be nominated: {', '.join(public_game_state.nominatable_players)}"
+        else:
+            nomination_info = "No players can currently be nominated."
+
+        return f"""
+<player_identity>
+You are a player in Blood on the Clocktower.
+Your name is {self.name}.
+Your character is {self.character.value if self.drunk_character is None else self.drunk_character.value}. 
+You are on the {self.alignment.name} team.
+Remember to always act according to your character's abilities and your team's win condition. Analyze the current game state carefully before making decisions.
+</player_identity>
+
+<current_state>
+It is round {public_game_state.round_number} and the current phase is {public_game_state.current_phase}.
+You are {'alive' if self.alive else f'dead and you have {'not' if not self.used_dead_vote else ''} used your dead vote'}. 
+You have {"not" if self.used_nomination else ""} nominated today. 
+You have {self.messages_left} messages left that you can send today.
+</current_state>
+
+<game_state>
+{game_state}
+{seating_explanation}
+{chopping_block_info}
+{nomination_info}
+</game_state>
+
+<notes>
+{self.notes}
+</notes>
+
+<history>
+{"\n".join(self.history)}
+</history>"""
+
+
+
+
+
     def summarize_history(self, public_game_state: PublicGameState, event_tracker=None) -> None:
         """Summarize the player's history into their notes using AI."""
         if not self.history:
             self.notes = "No notes so far."
             return
         
-        system_prompt = self._get_player_system_prompt(public_game_state)
+        # Use prefix caching for better performance (no redundancy)
         user_message = "It's time to update your notes using your history of events. You can find your notes in between <notes></notes> tags and history in between <history></history> tags. After this update your history will be cleared so make sure that all of the important information is included in your notes. Only give me your updated notes, no other text and use bullet points. You only need to note information that is not in the rest of your system prompt."
         
-        response = request_llm_response(system_prompt, user_message)
+        response = request_llm_response(
+            user_message=user_message,
+            static_system_prefix=self._get_static_system_prefix(public_game_state.character_str),
+            dynamic_system_content=self._get_dynamic_system_content(public_game_state)
+        )
+        
         if isinstance(response, str):
             self.notes = response
         else:
@@ -137,8 +215,6 @@ class Player:
                 return Vote.NO
             
         # Get the player's vote based on the game state and previous votes
-        system_prompt = self._get_player_system_prompt(public_game_state)
-        
         if nominee == self.name:
             nominee_context = "You are the nominee for execution. "
         else:
@@ -162,76 +238,34 @@ You need to vote on the current nomination.
 {votes_context}
 
 Should you vote YES or NO on this nomination? Consider all relevant information.
-Respond with only 'YES' or 'NO'.
+
+IMPORTANT: You must respond with ONLY the word 'YES' or 'NO' - nothing else. Do not include any explanation, reasoning, or other text.
 """
         
         response = request_llm_response(
-            system_prompt=system_prompt,
             user_message=user_message,
-            max_tokens=100
+            static_system_prefix=self._get_static_system_prefix(public_game_state.character_str),
+            dynamic_system_content=self._get_dynamic_system_content(public_game_state),
+            max_tokens=10  # Reduce max tokens to discourage long responses
         )
         
         # Ensure response is a string and convert to uppercase
         if isinstance(response, str):
             vote_response = response.strip().upper()
-            # Return the appropriate vote
-            if vote_response == "YES":
+            
+            # Check if the response contains YES (even if there's extra text)
+            if "YES" in vote_response:
                 if not self.alive:
                     self.used_dead_vote = True
                 return Vote.YES
+            # Check if the response contains NO or if it doesn't contain YES
             else:
                 return Vote.NO
         else:
             # Default to NO if there was an issue with the response
             return Vote.NO
     
-    def _get_player_system_prompt(self, public_game_state: PublicGameState, inlcude_history: bool = True) -> str:
-        game_state = "Here is the publicly available player state in the order they are sitting in:" + ", ".join([json.dumps(player) for player in public_game_state.player_state])
-        seating_explanation = f"The seating order is important for several game mechanics such as voting order and character abilities. The seat adjacency wraps from the first to the last. For example, {public_game_state.player_state[0]['name']} is adjacent to {public_game_state.player_state[-1]['name']} and {public_game_state.player_state[1]['name']}."
-        
-        # Add chopping block information
-        chopping_block_info = ""
-        if public_game_state.chopping_block is not None:
-            chopping_block_info = f"\nCurrent execution nominee: {public_game_state.chopping_block.nominee} with {public_game_state.chopping_block.votes} votes. They will be executed at the end of the day unless someone else gets more votes."
-        else:
-            chopping_block_info = "\nNo one is currently nominated for execution."
 
-        system_prompt = f"""<rules>
-{BOTC_RULES}
-</rules>
-
-<characters>
-{public_game_state.character_str}
-</characters>
-
-<player_state>
-You are a player.
-Your name is {self.name}.
-Your character is {self.character.value if self.drunk_character is None else self.drunk_character.value}. 
-You are on the {self.alignment.name} team. 
-You are {'alive' if self.alive else f'dead and you have {'not' if not self.used_dead_vote else ''} used your dead vote'}. 
-You have {"not" if self.used_nomination else ""} nominated today. 
-You have {self.messages_left} messages left that you can send today. 
-</player_state>
-
-<game_state>
-It is round {public_game_state.round_number} and the current phase is {public_game_state.current_phase}.
-{game_state}
-{seating_explanation}
-{chopping_block_info}
-</game_state>
-
-Here are your notes summarizing the previous rounds:
-<notes>
-{self.notes}
-</notes>
-
-Here's your history of the current round from oldest to newest:
-<history>
-{"\n".join(self.history)}
-</history>"""
-
-        return system_prompt
     
     def day_action(self, public_game_state: PublicGameState, nominations_open: bool = False) -> Optional[DayAction]:
         available_tools: List[ToolParam] = []
@@ -256,14 +290,14 @@ Here's your history of the current round from oldest to newest:
             return NoAction(f"{self.name} has no actions available and passes")
 
         # Always add the pass tool as an option when other tools are available
-        available_tools.append(PASS_TOOL)
+        # available_tools.append(PASS_TOOL)
 
-        system_prompt = self._get_player_system_prompt(public_game_state)
         user_message = "It is your turn to either take an action or pass. What do you want to do?"
         
         response = request_llm_response(
-            system_prompt=system_prompt,
             user_message=user_message,
+            static_system_prefix=self._get_static_system_prefix(public_game_state.character_str),
+            dynamic_system_content=self._get_dynamic_system_content(public_game_state),
             tools=available_tools
         )
         
@@ -280,8 +314,9 @@ Here's your history of the current round from oldest to newest:
                 
             elif function_name == "nominate":
                 player = arguments.get("player", "")
-                reason = arguments.get("reason", "No reason provided")
-                return NominationAction(player, reason)
+                private_reasoning = arguments.get("private_reasoning", "No private reasoning provided")
+                public_reasoning = arguments.get("public_reasoning", "No public reasoning provided")
+                return NominationAction(player, private_reasoning, public_reasoning)
                 
             elif function_name == "slayer_power":
                 target = arguments.get("target", "")
@@ -295,12 +330,12 @@ Here's your history of the current round from oldest to newest:
         return NoAction(f"{self.name} did not choose a valid action")
     
     def night_player_choice(self, public_game_state: PublicGameState, prompt: str) -> list[str]:
-        system_prompt = self._get_player_system_prompt(public_game_state)
         user_message = f"{prompt}\nProvide an explaination of your choice between <thinking> tags, then your choice or choices between <names> tags and seperated by commas. e.g. <names>Bruce, Jacob</names>"
 
         response = request_llm_response(
-            system_prompt=system_prompt,
             user_message=user_message,
+            static_system_prefix=self._get_static_system_prefix(public_game_state.character_str),
+            dynamic_system_content=self._get_dynamic_system_content(public_game_state),
             tools=[]
         )
 

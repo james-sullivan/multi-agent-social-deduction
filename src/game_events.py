@@ -14,7 +14,7 @@ class EventType(Enum):
     ROUND_START = "round_start"
     PHASE_CHANGE = "phase_change"
     PLAYER_DEATH = "player_death"
-    CHARACTER_POWER = "character_power"
+    CHARACTER_POWER = "character_power"  # Keep for backwards compatibility and generic use
     NOMINATION = "nomination"
     VOTING = "voting"
     EXECUTION = "execution"
@@ -25,6 +25,26 @@ class EventType(Enum):
     PLAYER_PASS = "player_pass"
     PLAYER_SETUP = "player_setup"
     STORYTELLER_INFO = "storyteller_info"
+    
+    # Specific character power events
+    WASHERWOMAN_POWER = "washerwoman_power"
+    LIBRARIAN_POWER = "librarian_power"
+    INVESTIGATOR_POWER = "investigator_power"
+    CHEF_POWER = "chef_power"
+    EMPATH_POWER = "empath_power"
+    FORTUNETELLER_POWER = "fortuneteller_power"
+    POISONER_POWER = "poisoner_power"
+    SPY_POWER = "spy_power"
+    MONK_POWER = "monk_power"
+    IMP_POWER = "imp_power"
+    RAVENKEEPER_POWER = "ravenkeeper_power"
+    UNDERTAKER_POWER = "undertaker_power"
+    BUTLER_POWER = "butler_power"
+    SLAYER_POWER = "slayer_power"
+    
+    # Special character events
+    SCARLET_WOMAN_TRANSFORM = "scarlet_woman_transform"
+    MAYOR_WIN = "mayor_win"
 
 @dataclass
 class GameEvent:
@@ -89,6 +109,26 @@ class GameEventTracker:
             EventType.PLAYER_PASS: "\033[0;90m",     # Dark gray
             EventType.PLAYER_SETUP: "\033[1;96m",    # Bright cyan
             EventType.STORYTELLER_INFO: "\033[1;97m", # Bright white
+            
+            # Specific character power colors (all use same color)
+            EventType.WASHERWOMAN_POWER: "\033[1;35m",    # Bold magenta
+            EventType.LIBRARIAN_POWER: "\033[1;35m",      # Bold magenta
+            EventType.INVESTIGATOR_POWER: "\033[1;35m",   # Bold magenta
+            EventType.CHEF_POWER: "\033[1;35m",           # Bold magenta
+            EventType.EMPATH_POWER: "\033[1;35m",         # Bold magenta
+            EventType.FORTUNETELLER_POWER: "\033[1;35m",  # Bold magenta
+            EventType.POISONER_POWER: "\033[1;35m",       # Bold magenta
+            EventType.SPY_POWER: "\033[1;35m",            # Bold magenta
+            EventType.MONK_POWER: "\033[1;35m",           # Bold magenta
+            EventType.IMP_POWER: "\033[1;35m",            # Bold magenta
+            EventType.RAVENKEEPER_POWER: "\033[1;35m",    # Bold magenta
+            EventType.UNDERTAKER_POWER: "\033[1;35m",     # Bold magenta
+            EventType.BUTLER_POWER: "\033[1;35m",         # Bold magenta
+            EventType.SLAYER_POWER: "\033[1;35m",         # Bold magenta
+            
+            # Special character events
+            EventType.SCARLET_WOMAN_TRANSFORM: "\033[1;95m", # Bright magenta
+            EventType.MAYOR_WIN: "\033[1;32m",                # Bold green
         }
         
         reset = "\033[0m"
@@ -104,9 +144,9 @@ class GameEventTracker:
             EventType.PHASE_CHANGE: "🌙 PHASE",
             EventType.PLAYER_DEATH: "💀 DEATH",
             EventType.CHARACTER_POWER: "✨ POWER",
-            EventType.NOMINATION: "⚖️  NOMINATION",
-            EventType.VOTING: "🗳️  VOTE",
-            EventType.EXECUTION: "⚔️  EXECUTION",
+            EventType.NOMINATION: "⚖️ NOMINATION",
+            EventType.VOTING: "🗳️ VOTE",
+            EventType.EXECUTION: "⚔️ EXECUTION",
             EventType.MESSAGE: "💬 MESSAGE",
             EventType.GAME_END: "🏁 GAME END",
             EventType.INFO_BROADCAST: "📢 INFO",
@@ -114,6 +154,26 @@ class GameEventTracker:
             EventType.PLAYER_PASS: "⏭️  PASS",
             EventType.PLAYER_SETUP: "🔧 SETUP",
             EventType.STORYTELLER_INFO: "🎭 STORYTELLER",
+            
+            # Specific character power prefixes
+            EventType.WASHERWOMAN_POWER: "🧺 WASHERWOMAN",
+            EventType.LIBRARIAN_POWER: "📚 LIBRARIAN",
+            EventType.INVESTIGATOR_POWER: "🔍 INVESTIGATOR",
+            EventType.CHEF_POWER: "👨‍🍳 CHEF",
+            EventType.EMPATH_POWER: "💝 EMPATH",
+            EventType.FORTUNETELLER_POWER: "🔮 FORTUNETELLER",
+            EventType.POISONER_POWER: "💉 POISONER",
+            EventType.SPY_POWER: "🕵️ SPY",
+            EventType.MONK_POWER: "🙏 MONK",
+            EventType.IMP_POWER: "😈 IMP",
+            EventType.RAVENKEEPER_POWER: "🐦 RAVENKEEPER",
+            EventType.UNDERTAKER_POWER: "⚰️ UNDERTAKER",
+            EventType.BUTLER_POWER: "🤵 BUTLER",
+            EventType.SLAYER_POWER: "⚔️ SLAYER",
+            
+            # Special character events
+            EventType.SCARLET_WOMAN_TRANSFORM: "🔄 SCARLET WOMAN",
+            EventType.MAYOR_WIN: "🏛️ MAYOR WIN",
         }
         
         prefix = prefix_map.get(event.event_type, "📝 EVENT")
@@ -137,16 +197,12 @@ class GameEventTracker:
                 formatted_description = f"{sender_highlight} → {recipients_highlight}: {message}"
                 print(f"{color}[{time_str}] {prefix}: {formatted_description}{reset}")
             else:
-                # Fallback to original format if parsing fails
-                if event.participants:
-                    participants_str = f" [{', '.join(event.participants)}]"
-                else:
-                    participants_str = ""
-                print(f"{color}[{time_str}] {prefix}: {event.description}{participants_str}{reset}")
+                # Fallback to original format if parsing fails - removed participant list
+                print(f"{color}[{time_str}] {prefix}: {event.description}{reset}")
         # Special formatting for notes updates
         elif event.event_type == EventType.NOTES_UPDATE:
-            participants_str = f" [{', '.join(event.participants)}]" if event.participants else ""
-            print(f"{color}[{time_str}] {prefix}: {event.description}{participants_str}{reset}")
+            # Removed participant list from notes updates
+            print(f"{color}[{time_str}] {prefix}: {event.description}{reset}")
             
             # Display the notes content if available
             if event.metadata and "notes" in event.metadata:
@@ -164,13 +220,8 @@ class GameEventTracker:
                         print(f"{color}      {line}{reset}")
                 print()  # Add empty line after notes
         else:
-            # Format the output
-            if event.participants:
-                participants_str = f" [{', '.join(event.participants)}]"
-            else:
-                participants_str = ""
-            
-            print(f"{color}[{time_str}] {prefix}: {event.description}{participants_str}{reset}")
+            # Format the output - removed participant list
+            print(f"{color}[{time_str}] {prefix}: {event.description}{reset}")
         
     def print_round_summary(self, round_number: int) -> None:
         """Print a summary of events for a specific round"""

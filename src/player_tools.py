@@ -26,7 +26,7 @@ MESSAGE_TOOL = ToolParam(
 # Slayer tool for using the one-time special ability
 SLAYER_TOOL = ToolParam(
     name="slayer_power",
-    description="Pick a player, if they are a Demon they will die. This power can only be used once per game and will only work if you are the Slayer.",
+    description="Pick a player, if they are a Demon they will die. This power can only be used once per game and will only work if you are the Slayer. It only makes sense to use this tool if you are claiming to be the Slayer.",
     input_schema={
         "type": "object",
         "properties": {
@@ -42,7 +42,7 @@ SLAYER_TOOL = ToolParam(
 # Nomination tool for eliminating players
 NOMINATION_TOOL = ToolParam(
     name="nominate",
-    description="Nominate a player for execution. This will start a vote to execute the nominated player. You can only nominate once per day and each player can only be nominated once per day. The reason you provide will be shared with the other players.",
+    description="Nominate a player for execution. This will start a vote to execute the nominated player. You can only nominate once per day and each player can only be nominated once per day. If you nominate, make sure the player you select has not been nominated yet today. You must provide both private reasoning (for your own strategic thinking) and public reasoning (what others will hear).",
     input_schema={
         "type": "object",
         "properties": {
@@ -50,12 +50,16 @@ NOMINATION_TOOL = ToolParam(
                 "type": "string",
                 "description": "The player to nominate for execution. If you want to nominate Susan, you would put 'Susan' here."
             },
-            "reason": {
+            "private_reasoning": {
                 "type": "string",
-                "description": "The reasoning for nominating the player. This will be shared with all other players."
+                "description": "Your private strategic reasoning for this nomination. This will NOT be shared with other players and can include your true thoughts, team strategy, etc."
+            },
+            "public_reasoning": {
+                "type": "string", 
+                "description": "The public reasoning you want to share with all other players. This should sound convincing to good players and not reveal your evil nature if you're evil."
             }
         },
-        "required": ["player", "reason"]
+        "required": ["player", "private_reasoning", "public_reasoning"]
     }
 )
 
