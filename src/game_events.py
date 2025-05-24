@@ -41,6 +41,7 @@ class EventType(Enum):
     UNDERTAKER_POWER = "undertaker_power"
     BUTLER_POWER = "butler_power"
     SLAYER_POWER = "slayer_power"
+    VIRGIN_POWER = "virgin_power"
     
     # Special character events
     SCARLET_WOMAN_TRANSFORM = "scarlet_woman_transform"
@@ -125,7 +126,7 @@ class GameEventTracker:
             EventType.UNDERTAKER_POWER: "\033[1;35m",     # Bold magenta
             EventType.BUTLER_POWER: "\033[1;35m",         # Bold magenta
             EventType.SLAYER_POWER: "\033[1;35m",         # Bold magenta
-            
+            EventType.VIRGIN_POWER: "\033[1;35m",         # Bold magenta
             # Special character events
             EventType.SCARLET_WOMAN_TRANSFORM: "\033[1;95m", # Bright magenta
             EventType.MAYOR_WIN: "\033[1;32m",                # Bold green
@@ -157,12 +158,12 @@ class GameEventTracker:
             
             # Specific character power prefixes
             EventType.WASHERWOMAN_POWER: "🧺 WASHERWOMAN",
-            EventType.LIBRARIAN_POWER: "📚 LIBRARIAN",
+            EventType.LIBRARIAN_POWER: "📚 LIBRARIAN", 
             EventType.INVESTIGATOR_POWER: "🔍 INVESTIGATOR",
             EventType.CHEF_POWER: "👨‍🍳 CHEF",
             EventType.EMPATH_POWER: "💝 EMPATH",
             EventType.FORTUNETELLER_POWER: "🔮 FORTUNETELLER",
-            EventType.POISONER_POWER: "💉 POISONER",
+            EventType.POISONER_POWER: "🧪 POISONER",
             EventType.SPY_POWER: "🕵️ SPY",
             EventType.MONK_POWER: "🙏 MONK",
             EventType.IMP_POWER: "😈 IMP",
@@ -170,7 +171,7 @@ class GameEventTracker:
             EventType.UNDERTAKER_POWER: "⚰️ UNDERTAKER",
             EventType.BUTLER_POWER: "🤵 BUTLER",
             EventType.SLAYER_POWER: "⚔️ SLAYER",
-            
+            EventType.VIRGIN_POWER: "👰 VIRGIN",
             # Special character events
             EventType.SCARLET_WOMAN_TRANSFORM: "🔄 SCARLET WOMAN",
             EventType.MAYOR_WIN: "🏛️ MAYOR WIN",

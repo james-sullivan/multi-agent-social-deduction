@@ -2,6 +2,7 @@ from __future__ import annotations
 from game_enums import Alignment, Vote
 from characters import Character
 from typing import Optional, List, TYPE_CHECKING
+import logging
 
 if TYPE_CHECKING:
     from game import PublicGameState
@@ -13,6 +14,9 @@ from prompts import BOTC_RULES
 from scripts import TROUBLE_BREWING_CHARACTERS
 from dataclasses import dataclass
 from inference import request_llm_response
+import re
+
+logger = logging.getLogger(__name__)
 
 class DayActions(Enum):
     MESSAGE = "message"
@@ -80,6 +84,7 @@ class Player:
 
     def start_of_day(self) -> None:
         self.used_nomination = False
+        self.nominated_today = False
         self.messages_left = 2
 
     def give_info(self, info: str) -> None:
@@ -262,6 +267,7 @@ IMPORTANT: You must respond with ONLY the word 'YES' or 'NO' - nothing else. Do 
             else:
                 return Vote.NO
         else:
+            logger.error(f"{self.name} voted with an invalid response: {response}")
             # Default to NO if there was an issue with the response
             return Vote.NO
     
@@ -325,6 +331,8 @@ IMPORTANT: You must respond with ONLY the word 'YES' or 'NO' - nothing else. Do 
                 
             elif function_name == "pass":
                 return NoAction(f"{self.name} passed on their turn")
+        else:
+            logger.error(f"{self.name} chose an invalid action: {response}")
                 
         # Default if no action was taken or there was an error
         return NoAction(f"{self.name} did not choose a valid action")
@@ -340,12 +348,17 @@ IMPORTANT: You must respond with ONLY the word 'YES' or 'NO' - nothing else. Do 
         )
 
         # Extract player names using regex
-        import re
+        player_names = []
         if isinstance(response, str):
             name_match = re.search(r'<names>(.*?)</names>', response, re.DOTALL)
             if name_match:
                 names_str = name_match.group(1)
-                return [name.strip() for name in names_str.split(',')]
-        
-        return []
+                player_names = [name.strip() for name in names_str.split(',')]
+        else:
+            logger.error(f"{self.name} chose an invalid player: {response}")
+
+        if not player_names:
+            logger.error(f"{self.name} chose an invalid player: {response}")
+
+        return player_names
         

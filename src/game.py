@@ -2,6 +2,7 @@ import random
 import logging
 from dataclasses import dataclass
 from collections import defaultdict
+from typing import Any
 
 from player import DayAction, MessageAction, NominationAction, SlayerPowerAction, NoAction, Player
 from characters import Character, Townsfolk, Outsider, Demon, Minion
@@ -214,29 +215,19 @@ class Game:
             woman = scarlet_woman[0]
             old_character = woman.character
             woman.character = dead_player.character
-            self._broadcast_info(woman, f"Storyteller: The Demon has died and you have become the new Demon. Your chacter is now {woman.character.value}")
-            
-            # Track the Scarlet Woman transformation
-            self.event_tracker.add_event(
-                event_type=EventType.SCARLET_WOMAN_TRANSFORM,
-                description=f"{woman.name} (Scarlet Woman) became the new {woman.character.value}",
-                round_number=self._round_number,
-                phase=self._current_phase.value,
-                participants=[woman.name],
-                metadata={
-                    "character": "Scarlet Woman",
-                    "old_character": old_character.value,
-                    "new_character": woman.character.value,
-                    "dead_demon": dead_player.name
-                }
-            )
+            self._broadcast_info("Storyteller", woman, f"The Demon has died and you have become the new Demon. Your chacter is now {woman.character.value}",
+                                event_type=EventType.SCARLET_WOMAN_TRANSFORM,
+                                metadata={
+                                    "character": "Scarlet Woman",
+                                    "old_character": old_character.value,
+                                    "new_character": woman.character.value,
+                                    "dead_demon": dead_player.name
+                                })
             return True
         return False
     
     def _kill_player(self, player: Player, broadcast: bool = True, killed_by_demon: bool = False) -> tuple[list[Player], str]:
         player.alive = False
-        
-        # Track the death event
         self.event_tracker.add_event(
             event_type=EventType.PLAYER_DEATH,
             description=f"{player.name} ({player.character.value}) died",
@@ -251,10 +242,14 @@ class Game:
             self._reminder_tokens[Townsfolk.RAVENKEEPER][ReminderTokens.RAVENKEEPER_WOKEN] = player
         
         self._scarlet_woman_check(player)
-        message = f"Storyteller: {player.name} died."
+        message = f"{player.name} died."
         if broadcast:
-            for player_obj in self._all_players():
-                self._broadcast_info(player_obj, message)
+            self._broadcast_info(sender="Storyteller", 
+                                 recipients=self._all_players(), 
+                                 info=message, 
+                                 event_type=EventType.PLAYER_DEATH,
+                                 description=f"{player.name} ({player.character.value}) died",
+                                 metadata={"character": player.character.value, "killed_by_demon": killed_by_demon})
         return self._all_players(), message
     
     def _safe_from_demon(self, player: Player) -> bool:
@@ -320,31 +315,47 @@ class Game:
         
         return False
     
-    def _broadcast_info(self, recipients: str | Player | list[str | Player] | list[Player] | list[str], info: str, event_type: EventType = EventType.INFO_BROADCAST) -> None:    
+    def _broadcast_info(self,
+                        sender: str, 
+                        recipients: str | Player | list[str | Player] | list[Player] | list[str], 
+                        info: str, 
+                        event_type: EventType = EventType.INFO_BROADCAST,
+                        **kwargs) -> None:    
         if not isinstance(recipients, list):
             recipients = [recipients]
 
-        formatted_info = f"Round: {self._round_number}, Phase: {self._current_phase.value}, {info}"
-        
         # Get recipient names for event tracking
         recipient_names = []
         for recipient in recipients:
             if isinstance(recipient, Player):
-                recipient.give_info(formatted_info)
                 recipient_names.append(recipient.name)
             else:
-                self._player_dict[recipient].give_info(formatted_info)
                 recipient_names.append(recipient)
+
+        # Always use MESSAGE format for consistency but preserve event type
+        recipient_str = ", ".join(recipient_names)
+        formatted_info = f"Round: {self._round_number}, Phase: {self._current_phase.value}, Message from {sender} to {recipient_str}: {info}"
         
-        # Track the event (but don't track generic info broadcasts to avoid spam)
-        if event_type != EventType.INFO_BROADCAST:
-            self.event_tracker.add_event(
-                event_type=event_type,
-                description=info,
-                round_number=self._round_number,
-                phase=self._current_phase.value,
-                participants=recipient_names if len(recipient_names) <= 5 else ["Multiple players"]
-            )
+        # Extract description from kwargs if provided, otherwise use default
+        description = kwargs.pop("description", f"{sender} → {recipient_str}: {info}")
+        participants = [sender] + recipient_names
+
+        # Send info to each recipient
+        for recipient in recipients:
+            if isinstance(recipient, Player):
+                recipient.give_info(formatted_info)
+            else:
+                self._player_dict[recipient].give_info(formatted_info)
+        
+        # Use the provided event_type while keeping consistent formatting
+        self.event_tracker.add_event(
+            event_type=event_type,
+            description=description,
+            round_number=self._round_number,
+            phase=self._current_phase.value,
+            participants=participants,
+            **kwargs
+        )
 
     def _washerwoman_power(self, player: Player) -> None:
         # Get the players from reminder tokens
@@ -358,39 +369,21 @@ class Game:
             townsfolk_character = random.choice(self._script.townsfolk)
             townsfolk_player, other_player = random_players[0], random_players[1]
             
-        info_msg = f"Storyteller: One of these players is the {townsfolk_character.value}: {townsfolk_player.name}, {other_player.name}"
-        self._broadcast_info(player, info_msg, EventType.WASHERWOMAN_POWER)
-        
-        # Track the power usage
-        self.event_tracker.add_event(
-            event_type=EventType.WASHERWOMAN_POWER,
-            description=f"{player.name} ({player.character.value}) received information about {townsfolk_character.value}",
-            round_number=self._round_number,
-            phase=self._current_phase.value,
-            participants=[player.name],
-            metadata={
-                "character": player.character.value,
-                "shown_players": [townsfolk_player.name, other_player.name],
-                "shown_character": townsfolk_character.value
-            }
-        )
+        info_msg = f"One of these players is the {townsfolk_character.value}: {townsfolk_player.name}, {other_player.name}"
+        self._broadcast_info("Storyteller", player, info_msg, EventType.WASHERWOMAN_POWER, 
+                            metadata={
+                                "character": player.character.value,
+                                "shown_players": [townsfolk_player.name, other_player.name],
+                                "shown_character": townsfolk_character.value
+                            })
 
     def _librarian_power(self, player: Player) -> None:
         # Check if there are any outsiders in the game
         if ReminderTokens.LIBRARIAN_OUTSIDER not in self._reminder_tokens[Townsfolk.LIBRARIAN]:
             # No outsiders in the game
-            info_msg = "Storyteller: There are no Outsiders in play."
-            self._broadcast_info(player, info_msg, EventType.LIBRARIAN_POWER)
-            
-            # Track the power usage
-            self.event_tracker.add_event(
-                event_type=EventType.LIBRARIAN_POWER,
-                description=f"{player.name} ({player.character.value}) learned there are no Outsiders in play",
-                round_number=self._round_number,
-                phase=self._current_phase.value,
-                participants=[player.name],
-                metadata={"character": player.character.value, "result": "no_outsiders"}
-            )
+            info_msg = "There are no Outsiders in play."
+            self._broadcast_info("Storyteller", player, info_msg, EventType.LIBRARIAN_POWER,
+                                metadata={"character": player.character.value, "result": "no_outsiders"})
             return
             
         # Get the players from reminder tokens
@@ -404,22 +397,13 @@ class Game:
             outsider_character = random.choice(self._script.outsiders)
             outsider_player, other_player = random_players[0], random_players[1]
             
-        info_msg = f"Storyteller: One of these players is the {outsider_character.value}: {outsider_player.name}, {other_player.name}"
-        self._broadcast_info(player, info_msg, EventType.LIBRARIAN_POWER)
-        
-        # Track the power usage
-        self.event_tracker.add_event(
-            event_type=EventType.LIBRARIAN_POWER,
-            description=f"{player.name} ({player.character.value}) received information about {outsider_character.value}",
-            round_number=self._round_number,
-            phase=self._current_phase.value,
-            participants=[player.name],
-            metadata={
-                "character": player.character.value,
-                "shown_players": [outsider_player.name, other_player.name],
-                "shown_character": outsider_character.value
-            }
-        )
+        info_msg = f"One of these players is the {outsider_character.value}: {outsider_player.name}, {other_player.name}"
+        self._broadcast_info("Storyteller", player, info_msg, EventType.LIBRARIAN_POWER,
+                            metadata={
+                                "character": player.character.value,
+                                "shown_players": [outsider_player.name, other_player.name],
+                                "shown_character": outsider_character.value
+                            })
 
     def _investigator_power(self, player: Player) -> None:
         # Get the players from reminder tokens
@@ -433,22 +417,13 @@ class Game:
             minion_character = random.choice(self._script.minions)
             minion_player, other_player = random_players[0], random_players[1]
             
-        info_msg = f"Storyteller: One of these players is the {minion_character.value}: {minion_player.name}, {other_player.name}"
-        self._broadcast_info(player, info_msg, EventType.INVESTIGATOR_POWER)
-        
-        # Track the power usage
-        self.event_tracker.add_event(
-            event_type=EventType.INVESTIGATOR_POWER,
-            description=f"{player.name} ({player.character.value}) received information about {minion_character.value}",
-            round_number=self._round_number,
-            phase=self._current_phase.value,
-            participants=[player.name],
-            metadata={
-                "character": player.character.value,
-                "shown_players": [minion_player.name, other_player.name],
-                "shown_character": minion_character.value
-            }
-        )
+        info_msg = f"One of these players is the {minion_character.value}: {minion_player.name}, {other_player.name}"
+        self._broadcast_info("Storyteller", player, info_msg, EventType.INVESTIGATOR_POWER,
+                            metadata={
+                                "character": player.character.value,
+                                "shown_players": [minion_player.name, other_player.name],
+                                "shown_character": minion_character.value
+                            })
 
     def _chef_power(self, player: Player) -> None:
         evil_pairs = 0
@@ -461,18 +436,9 @@ class Game:
             evil_count = sum(1 for neighbor in self._players if neighbor.alignment == Alignment.EVIL)
             evil_pairs = (evil_pairs + 1) % (evil_count - 1)
 
-        info_msg = f"Storyteller: There are {evil_pairs} adjacent pairs of evil players."
-        self._broadcast_info(player, info_msg, EventType.CHEF_POWER)
-        
-        # Track the power usage
-        self.event_tracker.add_event(
-            event_type=EventType.CHEF_POWER,
-            description=f"{player.name} ({player.character.value}) detected {evil_pairs} adjacent evil pairs",
-            round_number=self._round_number,
-            phase=self._current_phase.value,
-            participants=[player.name],
-            metadata={"character": player.character.value, "evil_pairs": evil_pairs}
-        )
+        info_msg = f"There are {evil_pairs} adjacent pairs of evil players."
+        self._broadcast_info("Storyteller", player, info_msg, EventType.CHEF_POWER,
+                            metadata={"character": player.character.value, "evil_pairs": evil_pairs})
 
     def _empath_power(self, player: Player) -> None:
         player_index = self._players.index(player)
@@ -498,17 +464,8 @@ class Game:
         if self._is_drunk_or_poisoned(player):
             evil_count = (evil_count + 1) % 3
             
-        self._broadcast_info(player, f"Storyteller: {evil_count} of your 2 alive neighbors are evil.")
-        
-        # Track the power usage
-        self.event_tracker.add_event(
-            event_type=EventType.EMPATH_POWER,
-            description=f"{player.name} ({player.character.value}) detected {evil_count} evil neighbors",
-            round_number=self._round_number,
-            phase=self._current_phase.value,
-            participants=[player.name],
-            metadata={"character": player.character.value, "evil_count": evil_count, "neighbors": [left.name, right.name]}
-        )
+        self._broadcast_info("Storyteller", player, f"{evil_count} of your 2 alive neighbors are evil.", EventType.EMPATH_POWER,
+                            metadata={"character": player.character.value, "evil_count": evil_count, "neighbors": [left.name, right.name]})
 
     def _fortuneteller_power(self, player: Player) -> None:
         player_choice = player.night_player_choice(self._get_public_game_state(), FORTUNETELLER_PROMPT)
@@ -534,25 +491,21 @@ class Game:
                 either_is_demon_or_red_herring = not either_is_demon_or_red_herring
             
             if either_is_demon_or_red_herring:
-                info_msg = f"Storyteller: Yes, one of {choice1.name} and {choice2.name} is the Demon."
-                self._broadcast_info(player, info_msg, EventType.FORTUNETELLER_POWER)
+                info_msg = f"Yes, one of {choice1.name} and {choice2.name} is the Demon."
+                self._broadcast_info("Storyteller", player, info_msg, EventType.FORTUNETELLER_POWER,
+                                    metadata={
+                                        "character": player.character.value,
+                                        "choices": [choice1.name, choice2.name],
+                                        "result": "yes"
+                                    })
             else:
-                info_msg = f"Storyteller: No, neither {choice1.name} nor {choice2.name} is the Demon."
-                self._broadcast_info(player, info_msg, EventType.FORTUNETELLER_POWER)
-            
-            # Track the power usage
-            self.event_tracker.add_event(
-                event_type=EventType.FORTUNETELLER_POWER,
-                description=f"{player.name} ({player.character.value}) asked about {choice1.name} and {choice2.name}",
-                round_number=self._round_number,
-                phase=self._current_phase.value,
-                participants=[player.name],
-                metadata={
-                    "character": player.character.value,
-                    "choices": [choice1.name, choice2.name],
-                    "result": "yes" if either_is_demon_or_red_herring else "no"
-                }
-            )
+                info_msg = f"No, neither {choice1.name} nor {choice2.name} is the Demon."
+                self._broadcast_info("Storyteller", player, info_msg, EventType.FORTUNETELLER_POWER,
+                                    metadata={
+                                        "character": player.character.value,
+                                        "choices": [choice1.name, choice2.name],
+                                        "result": "no"
+                                    })
         except KeyError:
             logger.error(f"Player {player.name} tried to choose {player_choice} but one of them is not in the game.")
         except ValueError as e:
@@ -564,16 +517,16 @@ class Game:
         try:
             if not player_choice or len(player_choice) != 1:
                 if not player_choice:
-                    self._broadcast_info(player, "Storyteller: You chose no one to poison tonight.")
+                    self._broadcast_info("Storyteller", player, "You chose no one to poison tonight.")
                     logger.info(f"Player {player.name} (Poisoner) chose no one to poison")
                 else:
-                    self._broadcast_info(player, f"Storyteller: You must choose exactly one player to poison (you chose {len(player_choice)}).")
+                    self._broadcast_info("Storyteller", player, f"You must choose exactly one player to poison (you chose {len(player_choice)}).")
                     logger.error(f"Player {player.name} tried to poison {player_choice}. len(player_choice) != 1")
                 return
             
             target_name = player_choice[0]
             if target_name not in self._player_dict:
-                self._broadcast_info(player, f"Storyteller: You cannot poison '{target_name}' - player not found.")
+                self._broadcast_info("Storyteller", player, f"You cannot poison '{target_name}' - player not found.")
                 logger.error(f"Player {player.name} tried to poison '{target_name}' but they are not in the game.")
                 return
             
@@ -585,20 +538,11 @@ class Game:
             choice: Player = self._player_dict[target_name]
             self._drunk_and_poisoned[choice].append(player)
             
-            self._broadcast_info(player, f"Storyteller: You have poisoned {choice.name} for the night and next day.")
-            
-            # Track the power usage
-            self.event_tracker.add_event(
-                event_type=EventType.POISONER_POWER,
-                description=f"{player.name} ({player.character.value}) poisoned {choice.name}",
-                round_number=self._round_number,
-                phase=self._current_phase.value,
-                participants=[player.name, choice.name],
-                metadata={"character": player.character.value, "target": choice.name}
-            )
+            self._broadcast_info("Storyteller", player, f"You have poisoned {choice.name} for the night and next day.", EventType.POISONER_POWER,
+                                metadata={"character": player.character.value, "target": choice.name})
         except Exception as e:
             logger.error(f"Error in poisoner power for {player.name}: {str(e)}")
-            self._broadcast_info(player, "Storyteller: Something went wrong with your poisoning attempt.")
+            self._broadcast_info("Storyteller", player, "Something went wrong with your poisoning attempt.")
 
     def _spy_power(self, player: Player) -> None:
         # The Spy sees the complete game state (the "Grimoire")
@@ -636,17 +580,8 @@ class Game:
                 grimoire_info.append(f"{drunk_player.name} (Drunk) thinks they are: {drunk_player.drunk_character.value}")
         
         full_grimoire = "\n".join(grimoire_info)
-        self._broadcast_info(player, f"Storyteller: THE GRIMOIRE:\n{full_grimoire}", EventType.SPY_POWER)
-        
-        # Track the power usage
-        self.event_tracker.add_event(
-            event_type=EventType.SPY_POWER,
-            description=f"{player.name} ({player.character.value}) viewed the complete game state",
-            round_number=self._round_number,
-            phase=self._current_phase.value,
-            participants=[player.name],
-            metadata={"character": player.character.value, "info_sections": len(grimoire_info)}
-        )
+        self._broadcast_info("Storyteller", player, f"THE GRIMOIRE:\n{full_grimoire}", EventType.SPY_POWER,
+                            metadata={"character": player.character.value, "info_sections": len(grimoire_info)})
 
     def _monk_power(self, player: Player) -> None:
         player_choice = player.night_player_choice(self._get_public_game_state(), MONK_PROMPT)
@@ -657,17 +592,8 @@ class Game:
             
             choice: Player = self._player_dict[player_choice[0]]
             self._reminder_tokens[Townsfolk.MONK][ReminderTokens.MONK_PROTECTED] = choice
-            self._broadcast_info(player, f"Storyteller: You have protected {choice.name} from the Demon tonight.")
-            
-            # Track the power usage
-            self.event_tracker.add_event(
-                event_type=EventType.MONK_POWER,
-                description=f"{player.name} ({player.character.value}) protected {choice.name}",
-                round_number=self._round_number,
-                phase=self._current_phase.value,
-                participants=[player.name, choice.name],
-                metadata={"character": player.character.value, "target": choice.name}
-            )
+            self._broadcast_info("Storyteller", player, f"You have protected {choice.name} from the Demon tonight.", EventType.MONK_POWER,
+                                metadata={"character": player.character.value, "target": choice.name})
         except KeyError:
             logger.error(f"Player {player.name} tried to protect {player_choice[0]} but they are not in the game.")
         except ValueError:
@@ -679,16 +605,16 @@ class Game:
         try:
             if not player_choice or len(player_choice) != 1:
                 if not player_choice:
-                    self._broadcast_info(player, "Storyteller: You chose no one to kill tonight.")
+                    self._broadcast_info("Storyteller", player, "You chose no one to kill tonight.")
                     logger.info(f"Player {player.name} (Imp) chose no one to kill")
                 else:
-                    self._broadcast_info(player, f"Storyteller: You must choose exactly one player to kill (you chose {len(player_choice)}).")
+                    self._broadcast_info("Storyteller", player, f"You must choose exactly one player to kill (you chose {len(player_choice)}).")
                     logger.error(f"Player {player.name} tried to kill {player_choice}. len(player_choice) != 1")
                 return
             
             target_name = player_choice[0]
             if target_name not in self._player_dict:
-                self._broadcast_info(player, f"Storyteller: You cannot kill '{target_name}' - player not found.")
+                self._broadcast_info("Storyteller", player, f"You cannot kill '{target_name}' - player not found.")
                 logger.error(f"Player {player.name} tried to kill '{target_name}' but they are not in the game.")
                 return
             
@@ -698,33 +624,15 @@ class Game:
 
             if not self._safe_from_demon(choice):
                 self._kill_player(choice, False, killed_by_demon=True)
-                self._broadcast_info(player, f"Storyteller: You have chosen to kill {choice.name} tonight.")
-                
-                # Track the successful kill
-                self.event_tracker.add_event(
-                    event_type=EventType.IMP_POWER,
-                    description=f"{player.name} ({player.character.value}) killed {choice.name}",
-                    round_number=self._round_number,
-                    phase=self._current_phase.value,
-                    participants=[player.name, choice.name],
-                    metadata={"character": player.character.value, "target": choice.name, "success": True}
-                )
+                self._broadcast_info("Storyteller", player, f"You have chosen to kill {choice.name} tonight.", EventType.IMP_POWER,
+                                    metadata={"character": player.character.value, "target": choice.name, "success": True})
             else:
-                self._broadcast_info(player, f"Storyteller: You tried to kill {choice.name} but they were protected.")
-                
-                # Track the failed attack
-                self.event_tracker.add_event(
-                    event_type=EventType.IMP_POWER,
-                    description=f"{player.name} ({player.character.value}) tried to kill {choice.name} but they were protected",
-                    round_number=self._round_number,
-                    phase=self._current_phase.value,
-                    participants=[player.name, choice.name],
-                    metadata={"character": player.character.value, "target": choice.name, "success": False, "reason": "protected"}
-                )
+                self._broadcast_info("Storyteller", player, f"You tried to kill {choice.name} but they were protected.", EventType.IMP_POWER,
+                                    metadata={"character": player.character.value, "target": choice.name, "success": False, "reason": "protected"})
 
         except Exception as e:
             logger.error(f"Error in imp power for {player.name}: {str(e)}")
-            self._broadcast_info(player, "Storyteller: Something went wrong with your killing attempt.")
+            self._broadcast_info("Storyteller", player, "Something went wrong with your killing attempt.")
 
     def _ravenkeeper_power(self, player: Player) -> None:
         # Only allow Ravenkeeper to use power if they've died and been marked as woken
@@ -749,21 +657,12 @@ class Game:
                 other_characters = [char for char in all_characters if char != choice.character]
                 learned_character = random.choice(other_characters)
             
-            self._broadcast_info(player, f"Storyteller: {choice.name} is the {learned_character.value}.")
-            
-            # Track the power usage
-            self.event_tracker.add_event(
-                event_type=EventType.RAVENKEEPER_POWER,
-                description=f"{player.name} ({player.character.value}) learned {choice.name}'s character",
-                round_number=self._round_number,
-                phase=self._current_phase.value,
-                participants=[player.name],
-                metadata={
-                    "character": player.character.value,
-                    "target": choice.name,
-                    "learned_character": learned_character.value
-                }
-            )
+            self._broadcast_info("Storyteller", player, f"{choice.name} is the {learned_character.value}.", EventType.RAVENKEEPER_POWER,
+                                metadata={
+                                    "character": player.character.value,
+                                    "target": choice.name,
+                                    "learned_character": learned_character.value
+                                })
             
             # Clear the reminder token after use
             del self._reminder_tokens[Townsfolk.RAVENKEEPER][ReminderTokens.RAVENKEEPER_WOKEN]
@@ -777,18 +676,9 @@ class Game:
         # Check if there was an execution yesterday
         if (Townsfolk.UNDERTAKER not in self._reminder_tokens or 
             ReminderTokens.UNDERTAKER_EXECUTED not in self._reminder_tokens[Townsfolk.UNDERTAKER]):
-            info_msg = "Storyteller: No one was executed yesterday."
-            self._broadcast_info(player, info_msg, EventType.UNDERTAKER_POWER)
-            
-            # Track the power usage (no execution case)
-            self.event_tracker.add_event(
-                event_type=EventType.UNDERTAKER_POWER,
-                description=f"{player.name} ({player.character.value}) learned no one was executed yesterday",
-                round_number=self._round_number,
-                phase=self._current_phase.value,
-                participants=[player.name],
-                metadata={"character": player.character.value, "result": "no_execution"}
-            )
+            info_msg = "No one was executed yesterday."
+            self._broadcast_info("Storyteller", player, info_msg, EventType.UNDERTAKER_POWER,
+                                metadata={"character": player.character.value, "result": "no_execution"})
             return
         
         executed_player = self._reminder_tokens[Townsfolk.UNDERTAKER][ReminderTokens.UNDERTAKER_EXECUTED]
@@ -801,22 +691,13 @@ class Game:
             other_characters = [char for char in all_characters if char != executed_player.character]
             learned_character = random.choice(other_characters)
         
-        info_msg = f"Storyteller: {executed_player.name} was the {learned_character.value}."
-        self._broadcast_info(player, info_msg, EventType.UNDERTAKER_POWER)
-        
-        # Track the power usage
-        self.event_tracker.add_event(
-            event_type=EventType.UNDERTAKER_POWER,
-            description=f"{player.name} ({player.character.value}) learned {executed_player.name} was {learned_character.value}",
-            round_number=self._round_number,
-            phase=self._current_phase.value,
-            participants=[player.name],
-            metadata={
-                "character": player.character.value,
-                "executed_player": executed_player.name,
-                "learned_character": learned_character.value
-            }
-        )
+        info_msg = f"{executed_player.name} was the {learned_character.value}."
+        self._broadcast_info("Storyteller", player, info_msg, EventType.UNDERTAKER_POWER,
+                            metadata={
+                                "character": player.character.value,
+                                "executed_player": executed_player.name,
+                                "learned_character": learned_character.value
+                            })
         
         # Clear the reminder token after use
         del self._reminder_tokens[Townsfolk.UNDERTAKER][ReminderTokens.UNDERTAKER_EXECUTED]
@@ -837,17 +718,8 @@ class Game:
             # Set reminder token for the Butler's master
             self._reminder_tokens[Outsider.BUTLER][ReminderTokens.BUTLER_MASTER] = choice
             
-            self._broadcast_info(player, f"Storyteller: You have chosen {choice.name} as your master. Tomorrow, you may only vote if they are voting too.")
-            
-            # Track the power usage
-            self.event_tracker.add_event(
-                event_type=EventType.BUTLER_POWER,
-                description=f"{player.name} ({player.character.value}) chose {choice.name} as their master",
-                round_number=self._round_number,
-                phase=self._current_phase.value,
-                participants=[player.name],
-                metadata={"character": player.character.value, "master": choice.name}
-            )
+            self._broadcast_info("Storyteller", player, f"You have chosen {choice.name} as your master. Tomorrow, you may only vote if they are voting too.", EventType.BUTLER_POWER,
+                                metadata={"character": player.character.value, "master": choice.name})
             
         except KeyError:
             logger.error(f"Player {player.name} tried to choose {player_choice[0]} but they are not in the game.")
@@ -891,7 +763,7 @@ class Game:
     
     def _run_night_phase(self) -> None:
         self._current_phase = Phase.NIGHT
-        self._broadcast_info(self._all_players(), f"Storyteller: Night has begun on round {self._round_number}.", EventType.STORYTELLER_INFO)
+        self._broadcast_info("Storyteller", self._all_players(), f"Night has begun on round {self._round_number}.", EventType.STORYTELLER_INFO)
 
         # Track who is alive at the start of the night
         alive_at_start = {player.name for player in self._players if player.alive}
@@ -927,36 +799,15 @@ class Game:
 
             not_in_play = [townsfolk_not_in_play[0], townsfolk_not_in_play[1], outsiders_not_in_play[0]]
 
-            self._broadcast_info(demon, f"Storyteller: Three good roles not in play are {', '.join([character for character in not_in_play])} and your minion(s) are {', '.join([player.name for player in minions])}")
-            
-            # Track demon information event
-            self.event_tracker.add_event(
-                event_type=EventType.PLAYER_SETUP,
-                description=f"{demon.name} (Demon) learned not in play characters ({', '.join(not_in_play)}) and minion identities ({', '.join([m.name for m in minions])})",
-                round_number=self._round_number,
-                phase=self._current_phase.value,
-                participants=[demon.name],
-                metadata={
-                    "character": "Demon",
-                    "not_in_play": not_in_play,
-                    "minions": [m.name for m in minions]
-                }
-            )
+            self._broadcast_info("Storyteller", demon, f"Three good roles not in play are {', '.join([character for character in not_in_play])} and your minion(s) are {', '.join([player.name for player in minions])}", EventType.PLAYER_SETUP,
+                                metadata={
+                                    "character": demon.character.value,
+                                    "not_in_play": not_in_play,
+                                    "minions": [player.name for player in minions]
+                                })
 
-            self._broadcast_info(minions, f"Storyteller: The Demon is {demon.name}.")
-            
-            # Track minion information event
-            self.event_tracker.add_event(
-                event_type=EventType.PLAYER_SETUP,
-                description=f"Minions learned demon identity: {demon.name}",
-                round_number=self._round_number,
-                phase=self._current_phase.value,
-                participants=[m.name for m in minions],
-                metadata={
-                    "character": "Minions",
-                    "demon": demon.name
-                }
-            )
+            self._broadcast_info("Storyteller", minions, f"The Demon is {demon.name}.", EventType.PLAYER_SETUP,
+                                metadata={"demon": demon.name, "demon_character": demon.character.value})
 
             # First night character actions and info
             for character in self._script.first_night_order:
@@ -1017,12 +868,12 @@ class Game:
         if died_during_night:
             if len(died_during_night) == 1:
                 dead_player_name = list(died_during_night)[0]
-                self._broadcast_info(self._all_players(), f"Storyteller: This morning, {dead_player_name} was found dead.", EventType.STORYTELLER_INFO)
+                self._broadcast_info("Storyteller", self._all_players(), f"This morning, {dead_player_name} was found dead.", EventType.STORYTELLER_INFO)
             else:
                 dead_players = ", ".join(sorted(died_during_night))
-                self._broadcast_info(self._all_players(), f"Storyteller: This morning, {dead_players} were found dead.", EventType.STORYTELLER_INFO)
+                self._broadcast_info("Storyteller", self._all_players(), f"This morning, {dead_players} were found dead.", EventType.STORYTELLER_INFO)
         else:
-            self._broadcast_info(self._all_players(), "Storyteller: This morning, everyone is still alive.", EventType.STORYTELLER_INFO)
+            self._broadcast_info("Storyteller", self._all_players(), "This morning, everyone is still alive.", EventType.STORYTELLER_INFO)
 
     
     def _slayer_power(self, player: Player, action: SlayerPowerAction) -> bool:
@@ -1032,87 +883,47 @@ class Game:
         # If it works
         if it_works:
             self._kill_player(self._player_dict[action.target])
-            self._broadcast_info(self._all_players(), f"{player.name} has used their slayer power on {action.target} and killed them.")
-            
-            # Track successful slayer usage
-            self.event_tracker.add_event(
-                event_type=EventType.SLAYER_POWER,
-                description=f"{player.name} ({player.character.value}) successfully killed {action.target} (Demon)",
-                round_number=self._round_number,
-                phase=self._current_phase.value,
-                participants=[player.name, action.target],
-                metadata={
-                    "character": player.character.value,
-                    "target": action.target,
-                    "success": True
-                }
-            )
+            self._broadcast_info("Storyteller", self._all_players(), f"{player.name} has used their slayer power on {action.target} and killed them.",
+                                event_type=EventType.SLAYER_POWER,
+                                metadata={
+                                    "character": player.character.value,
+                                    "target": action.target,
+                                    "success": True
+                                })
         # If it doesn't work
         else:
-            self._broadcast_info(self._all_players(), f"{player.name} has used their slayer power on {action.target} and nothing happened.")
-            
-            # Track failed slayer usage
-            self.event_tracker.add_event(
-                event_type=EventType.SLAYER_POWER,
-                description=f"{player.name} ({player.character.value}) tried to kill {action.target} but it failed",
-                round_number=self._round_number,
-                phase=self._current_phase.value,
-                participants=[player.name, action.target],
-                metadata={
-                    "character": player.character.value,
-                    "target": action.target,
-                    "success": False
-                }
-            )
+            self._broadcast_info("Storyteller", self._all_players(), f"{player.name} has used their slayer power on {action.target} and nothing happened.",
+                                event_type=EventType.SLAYER_POWER,
+                                metadata={
+                                    "character": player.character.value,
+                                    "target": action.target,
+                                    "success": False
+                                })
 
         return it_works
     
-    def _send_message(self, from_player: Player, recipients: list[str], message: str) -> None:
-        recipient_str = ", ".join([name for name in recipients])
-        
-        # Store the message in each recipient's info history
-        formatted_info = f"Round: {self._round_number}, Phase: {self._current_phase.value}, Message from {from_player.name} to {recipient_str}: {message}"
-        for recipient_name in recipients:
-            self._player_dict[recipient_name].give_info(formatted_info)
-        
-        # Track the message event with cleaner format
-        self.event_tracker.add_event(
-            event_type=EventType.MESSAGE,
-            description=f"{from_player.name} → {recipient_str}: {message}",
-            round_number=self._round_number,
-            phase=self._current_phase.value,
-            participants=[from_player.name] + recipients,
-            metadata={"message": message, "full_message": message}
-        )
-
     # Returns True if someone died from the Virgin's power
     def _run_nomination(self, player: Player, action: NominationAction) -> bool:
-        # At this point, validation should already be done in _run_day_phase
         nominee = self._player_dict[action.nominee]
         
         nominee.nominated_today = True
         player.used_nomination = True
 
-        # Track the nomination event
-        self.event_tracker.add_event(
-            event_type=EventType.NOMINATION,
-            description=f"{player.name} nominated {nominee.name} for execution. Public reason: {action.public_reasoning}",
-            round_number=self._round_number,
-            phase=self._current_phase.value,
-            participants=[player.name, nominee.name],
-            metadata={
-                "private_reasoning": action.private_reasoning,
-                "public_reasoning": action.public_reasoning, 
-                "nominee_character": nominee.character.value
-            }
-        )
-
         if nominee.character == Townsfolk.VIRGIN and Townsfolk in self._get_player_roles(player):
-            self._kill_player(nominee)
-            self._broadcast_info(self._all_players(), f"{player.name} has nominated {nominee.name} for execution. {nominee.name} has been killed.")
+            self._kill_player(player)
+            self._broadcast_info(sender="Storyteller",
+                                 recipients=self._all_players(), 
+                                 info=f"{player.name} has nominated {nominee.name} for execution. {player.name} has been executed.",
+                                 event_type=EventType.VIRGIN_POWER,
+                                 metadata={"nominee": nominee.name, "nominator": player.name})
             return True
 
-        self._broadcast_info(self._all_players(), f"{player.name} has nominated {nominee.name} for execution. Their reason is: {action.public_reasoning}")
+        self._broadcast_info(sender="Storyteller", 
+                             recipients=self._all_players(), 
+                             info=f"{player.name} has nominated {nominee.name} for execution. Their reason is: {action.public_reasoning}",
+                             description=f"{player.name} nominated {nominee.name} for execution.\n\nPublic Reasoning: {action.public_reasoning}]\n\nPrivate Reasoning: {action.private_reasoning}",
+                             event_type=EventType.NOMINATION,
+                             metadata={"nominee": nominee.name, "player": player.name, "public_reasoning": action.public_reasoning, "private_reasoning": action.private_reasoning})
 
         if self._chopping_block:
             prev_count, _ = self._chopping_block
@@ -1144,8 +955,6 @@ class Game:
                     bulter_player_choice=butler_master_choice
                 )
                 previous_votes.append((player.name, vote))
-                
-                # Track each individual vote
                 self.event_tracker.add_event(
                     event_type=EventType.VOTING,
                     description=f"{player.name} voted {vote.value} on {nominee.name}'s nomination",
@@ -1177,10 +986,10 @@ class Game:
 
         if count >= required_to_nominate:
             self._chopping_block = (count, nominee)
-            self._broadcast_info(self._all_players(), f"Storyteller: {nominee.name} has been nominated for execution with {count} votes. They will die at the end of the day if no one else is nominated. Vote record: {format_vote_history(previous_votes)}")
+            self._broadcast_info("Storyteller", self._all_players(), f"{nominee.name} has been nominated for execution with {count} votes. They will die at the end of the day if no one else is nominated. Vote record: {format_vote_history(previous_votes)}")
         elif required_to_tie is not None and count == required_to_tie:
             self._chopping_block = None
-            self._broadcast_info(self._all_players(), f"Storyteller: {nominee.name} has received {count} votes. This ties the previous nominee. The chopping block is now empty. Vote record: {format_vote_history(previous_votes)}")
+            self._broadcast_info("Storyteller", self._all_players(), f"{nominee.name} has received {count} votes. This ties the previous nominee. The chopping block is now empty. Vote record: {format_vote_history(previous_votes)}")
 
         # Track the end of voting with result
         if count >= required_to_nominate:
@@ -1225,16 +1034,7 @@ class Game:
         for i in range(loops):
             if i == 1:  # Open nominations on the second iteration
                 self._nominations_open = True
-                self._broadcast_info(self._all_players(), "Storyteller: Nominations are now open.", EventType.STORYTELLER_INFO)
-                
-                # Track that nominations are now open
-                self.event_tracker.add_event(
-                    event_type=EventType.PHASE_CHANGE,
-                    description="Nominations are now open",
-                    round_number=self._round_number,
-                    phase=self._current_phase.value,
-                    metadata={"nominations_open": True}
-                )
+                self._broadcast_info("Storyteller", self._all_players(), "Nominations are now open.", EventType.STORYTELLER_INFO)
         
             day_players: list[Player] = list(self._players)
             random.shuffle(day_players)
@@ -1243,12 +1043,11 @@ class Game:
                 action: DayAction | None = player.day_action(self._get_public_game_state(), self._nominations_open)
 
                 if isinstance(action, MessageAction):
-                    self._send_message(player, action.recipients, action.message)
+                    self._broadcast_info(player.name, action.recipients, action.message, EventType.MESSAGE)
                 elif isinstance(action, NominationAction):
                     # Dead players cannot nominate
                     if not player.alive:
-                        self._broadcast_info(self._all_players(), f"Storyteller: {player.name} cannot nominate (dead players cannot nominate).")
-                        # Track the attempt as a pass
+                        self._broadcast_info("Storyteller", self._all_players(), f"{player.name} cannot nominate (dead players cannot nominate).")
                         self.event_tracker.add_event(
                             event_type=EventType.PLAYER_PASS,
                             description=f"{player.name} passed their turn: dead players cannot nominate",
@@ -1259,8 +1058,7 @@ class Game:
                         )
                     # Check if nomination is valid before proceeding
                     elif player.used_nomination:
-                        self._broadcast_info(self._all_players(), f"Storyteller: {player.name} cannot nominate again (already used nomination today).")
-                        # Track the attempt as a pass
+                        self._broadcast_info("Storyteller", self._all_players(), f"{player.name} cannot nominate again (already used nomination today).")
                         self.event_tracker.add_event(
                             event_type=EventType.PLAYER_PASS,
                             description=f"{player.name} passed their turn: already used nomination today",
@@ -1270,8 +1068,7 @@ class Game:
                             metadata={"character": player.character.value, "reason": "already_nominated"}
                         )
                     elif action.nominee not in self._player_dict:
-                        self._broadcast_info(self._all_players(), f"Storyteller: {player.name} cannot nominate {action.nominee} (player not found).")
-                        # Track the attempt as a pass
+                        self._broadcast_info("Storyteller", self._all_players(), f"{player.name} cannot nominate {action.nominee} (player not found).")
                         self.event_tracker.add_event(
                             event_type=EventType.PLAYER_PASS,
                             description=f"{player.name} passed their turn: invalid nominee '{action.nominee}'",
@@ -1281,8 +1078,7 @@ class Game:
                             metadata={"character": player.character.value, "reason": "invalid_nominee"}
                         )
                     elif self._player_dict[action.nominee].nominated_today:
-                        self._broadcast_info(self._all_players(), f"Storyteller: {player.name} cannot nominate {action.nominee} (already nominated today).")
-                        # Track the attempt as a pass
+                        self._broadcast_info("Storyteller", self._all_players(), f"{player.name} cannot nominate {action.nominee} (already nominated today).")
                         self.event_tracker.add_event(
                             event_type=EventType.PLAYER_PASS,
                             description=f"{player.name} passed their turn: {action.nominee} already nominated today",
@@ -1303,7 +1099,7 @@ class Game:
                             return game_over
                 elif isinstance(action, NoAction):
                     # Track when players pass their turn
-                    self._broadcast_info(self._all_players(), f"Storyteller: {player.name} passes their turn. {action.reason}")
+                    self._broadcast_info("Storyteller", self._all_players(), f"{player.name} passes their turn. {action.reason}")
                     self.event_tracker.add_event(
                         event_type=EventType.PLAYER_PASS,
                         description=f"{player.name} passed their turn: {action.reason}",
@@ -1313,25 +1109,9 @@ class Game:
                         metadata={"character": player.character.value, "reason": action.reason}
                     )
 
-        # Close nominations and move to execution phase
-        if self._nominations_open:
-            self._nominations_open = False
-            self._broadcast_info(self._all_players(), "Storyteller: Nominations are now closed.", EventType.STORYTELLER_INFO)
-            
-            # Track that nominations are now closed
-            self.event_tracker.add_event(
-                event_type=EventType.PHASE_CHANGE,
-                description="Nominations are now closed",
-                round_number=self._round_number,
-                phase=self._current_phase.value,
-                metadata={"nominations_open": False}
-            )
-
         # Execute player on chopping block at end of day
         if self._chopping_block is not None:
             _, executed_player = self._chopping_block
-            
-            # Track the execution event
             self.event_tracker.add_event(
                 event_type=EventType.EXECUTION,
                 description=f"{executed_player.name} ({executed_player.character.value}) has been executed",
@@ -1346,23 +1126,12 @@ class Game:
                 self._reminder_tokens[Townsfolk.UNDERTAKER][ReminderTokens.UNDERTAKER_EXECUTED] = executed_player
             
             self._kill_player(executed_player)
-            self._broadcast_info(self._all_players(), f"Storyteller: {executed_player.name} has been executed.", EventType.STORYTELLER_INFO)
+            self._broadcast_info("Storyteller", self._all_players(), f"{executed_player.name} has been executed.", EventType.STORYTELLER_INFO)
             self._chopping_block = None
         else:
             # No execution occurred - check Mayor's win condition
             if self._check_mayor_win_condition():
-                self._broadcast_info(self._all_players(), 
-                    "Storyteller: The Mayor's win condition has been met! Only 3 players remain alive and no execution occurred. Good team wins!")
-                
-                # Track the Mayor win event
-                self.event_tracker.add_event(
-                    event_type=EventType.MAYOR_WIN,
-                    description="Mayor's win condition triggered - Good team wins",
-                    round_number=self._round_number,
-                    phase=self._current_phase.value,
-                    participants=["Mayor"],
-                    metadata={"character": "Mayor", "win_condition": "3_players_no_execution"}
-                )
+                self._broadcast_info("Storyteller", self._all_players(), "The Mayor's win condition has been met! Only 3 players remain alive and no execution occurred. Good team wins!")
                 
                 return Alignment.GOOD
         
@@ -1396,15 +1165,12 @@ class Game:
         self._print_status_summary()
         
         while self._round_number <= max_rounds:
-            # Track round start
             self.event_tracker.add_event(
                 event_type=EventType.ROUND_START,
                 description=f"Round {self._round_number} begins",
                 round_number=self._round_number,
                 phase=self._current_phase.value
             )
-            
-            # Track phase changes
             self.event_tracker.add_event(
                 event_type=EventType.PHASE_CHANGE,
                 description=f"Night phase begins",
@@ -1417,8 +1183,6 @@ class Game:
             game_over = self._game_over()
             if game_over:
                 return game_over
-            
-            # Track phase change to day
             self.event_tracker.add_event(
                 event_type=EventType.PHASE_CHANGE,
                 description=f"Day phase begins",
