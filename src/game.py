@@ -12,6 +12,7 @@ from prompts import POISONER_PROMPT, FORTUNETELLER_PROMPT, MONK_PROMPT, RAVENKEE
 from characters import ReminderTokens
 from game_events import GameEventTracker, EventType
 from game_enums import Vote, Alignment, Phase
+from inference import get_cost_tracker
 logger = logging.getLogger(__name__)
 
 @dataclass
@@ -138,6 +139,22 @@ class Game:
                 }
             # If no outsiders, don't set any tokens - the power will handle this case
 
+        # Track that setup is complete
+        characters_in_play = [f"{p.name} ({p.character.value})" for p in self._players]
+        self.event_tracker.add_event(
+            event_type=EventType.GAME_SETUP,
+            description=f"Game setup complete with {len(self._players)} players",
+            round_number=self._round_number,
+            phase=self._current_phase.value,
+            participants=[p.name for p in self._players],
+            public_game_state=self._get_enhanced_game_state_for_logging(),
+            metadata={
+                "player_count": len(self._players),
+                "characters": characters_in_play,
+                "script": self._script.__class__.__name__
+            }
+        )
+
     def _get_character_alignment(self, character: Character) -> Alignment:
         """Get the alignment for a character"""
         if isinstance(character, (Townsfolk, Outsider)):
@@ -208,10 +225,36 @@ class Game:
             nominatable_players=nominatable_players
         )
 
+    def _get_enhanced_game_state_for_logging(self) -> dict[str, Any]:
+        """Convert the current public game state to an enhanced dictionary with character info for event tracking only"""
+        public_game_state = self._get_public_game_state()
+        
+        # Enhance player state with character information for event tracking
+        enhanced_player_state = []
+        for player_info in public_game_state.player_state:
+            # Find the corresponding player object to get character info
+            player_name = player_info["name"]
+            player_obj = self._player_dict[player_name]
+            
+            enhanced_info = player_info.copy()
+            enhanced_info["character"] = player_obj.character.value
+            enhanced_player_state.append(enhanced_info)
+        
+        return {
+            "player_state": enhanced_player_state,
+            "current_phase": public_game_state.current_phase.value,
+            "round_number": public_game_state.round_number,
+            "chopping_block": {
+                "nominee": public_game_state.chopping_block.nominee,
+                "votes": public_game_state.chopping_block.votes
+            } if public_game_state.chopping_block else None,
+            "nominatable_players": public_game_state.nominatable_players
+        }
+
     def _scarlet_woman_check(self, dead_player: Player) -> bool:
         scarlet_woman = [player for player in self._players if player.alive and player.character == Minion.SCARLET_WOMAN and not self._is_drunk_or_poisoned(player)]
-
-        if isinstance(dead_player.character, Demon) and len(scarlet_woman) == 1:
+        alive_count = sum(1 for player in self._players if player.alive)
+        if isinstance(dead_player.character, Demon) and len(scarlet_woman) == 1 and alive_count >= 4:
             woman = scarlet_woman[0]
             old_character = woman.character
             woman.character = dead_player.character
@@ -228,14 +271,6 @@ class Game:
     
     def _kill_player(self, player: Player, broadcast: bool = True, killed_by_demon: bool = False) -> tuple[list[Player], str]:
         player.alive = False
-        self.event_tracker.add_event(
-            event_type=EventType.PLAYER_DEATH,
-            description=f"{player.name} ({player.character.value}) died",
-            round_number=self._round_number,
-            phase=self._current_phase.value,
-            participants=[player.name],
-            metadata={"character": player.character.value, "killed_by_demon": killed_by_demon}
-        )
         
         # If the Ravenkeeper is killed by a demon, mark them to be woken during the next night
         if player.character == Townsfolk.RAVENKEEPER and killed_by_demon:
@@ -348,12 +383,13 @@ class Game:
                 self._player_dict[recipient].give_info(formatted_info)
         
         # Use the provided event_type while keeping consistent formatting
-        self.event_tracker.add_event(
+        self.event_tracker.add_event(   
             event_type=event_type,
             description=description,
             round_number=self._round_number,
             phase=self._current_phase.value,
             participants=participants,
+            public_game_state=self._get_enhanced_game_state_for_logging(),
             **kwargs
         )
 
@@ -765,8 +801,9 @@ class Game:
         self._current_phase = Phase.NIGHT
         self._broadcast_info("Storyteller", self._all_players(), f"Night has begun on round {self._round_number}.", EventType.STORYTELLER_INFO)
 
-        # Track who is alive at the start of the night
-        alive_at_start = {player.name for player in self._players if player.alive}
+        # Track who is alive at the start of the night (only needed after first night)
+        if self._round_number > 1:
+            alive_at_start = {player.name for player in self._players if player.alive}
 
         # Define helper function for getting night players
         def get_night_player(character: Character) -> Player | None:
@@ -834,6 +871,7 @@ class Game:
                         self._fortuneteller_power(player)
                     case Outsider.BUTLER:
                         self._butler_power(player)
+            
         # Other nights
         else:
             for character in self._script.other_night_order:
@@ -861,19 +899,19 @@ class Game:
                     case Outsider.BUTLER:
                         self._butler_power(player)
 
-        # Announce deaths at the end of the night
-        alive_at_end = {player.name for player in self._players if player.alive}
-        died_during_night = alive_at_start - alive_at_end
-        
-        if died_during_night:
-            if len(died_during_night) == 1:
-                dead_player_name = list(died_during_night)[0]
-                self._broadcast_info("Storyteller", self._all_players(), f"This morning, {dead_player_name} was found dead.", EventType.STORYTELLER_INFO)
+            # Announce deaths at the end of the night
+            alive_at_end = {player.name for player in self._players if player.alive}
+            died_during_night = alive_at_start - alive_at_end
+            
+            if died_during_night:
+                if len(died_during_night) == 1:
+                    dead_player_name = list(died_during_night)[0]
+                    self._broadcast_info("Storyteller", self._all_players(), f"This morning, {dead_player_name} was found dead.", EventType.STORYTELLER_INFO)
+                else:
+                    dead_players = ", ".join(sorted(died_during_night))
+                    self._broadcast_info("Storyteller", self._all_players(), f"This morning, {dead_players} were found dead.", EventType.STORYTELLER_INFO)
             else:
-                dead_players = ", ".join(sorted(died_during_night))
-                self._broadcast_info("Storyteller", self._all_players(), f"This morning, {dead_players} were found dead.", EventType.STORYTELLER_INFO)
-        else:
-            self._broadcast_info("Storyteller", self._all_players(), "This morning, everyone is still alive.", EventType.STORYTELLER_INFO)
+                self._broadcast_info("Storyteller", self._all_players(), "This morning, everyone is still alive.", EventType.STORYTELLER_INFO)
 
     
     def _slayer_power(self, player: Player, action: SlayerPowerAction) -> bool:
@@ -904,7 +942,23 @@ class Game:
     
     # Returns True if someone died from the Virgin's power
     def _run_nomination(self, player: Player, action: NominationAction) -> bool:
-        nominee = self._player_dict[action.nominee]
+        # Make sure the nominee exists and hasn't been nominated today
+        try:
+            nominee = self._player_dict[action.nominee]
+            if nominee.nominated_today:
+                raise ValueError("Nominee has already been nominated today")
+        except KeyError:
+            logger.error(f"Player {player.name} tried to nominate {action.nominee} but they are not in the game.")
+            self._broadcast_info("Storyteller", self._all_players(), f"{player.name} passed their turn.",
+                                description=f"{player.name} cannot nominate {action.nominee} (player not found).",
+                                metadata={"player": player.name, "character": player.character.value, "nominee": action.nominee})
+            return False
+        except ValueError:
+            logger.error(f"Player {player.name} tried to nominate {action.nominee} but they have already been nominated today.")
+            self._broadcast_info("Storyteller", self._all_players(), f"{player.name} cannot nominate {action.nominee} because they have already been nominated today.",
+                                description=f"{player.name} cannot nominate {action.nominee} because they have already been nominated today.",
+                                metadata={"player": player.name, "character": player.character.value, "nominee": action.nominee})
+            return False
         
         nominee.nominated_today = True
         player.used_nomination = True
@@ -918,12 +972,29 @@ class Game:
                                  metadata={"nominee": nominee.name, "nominator": player.name})
             return True
 
+        # Include chopping block information in the nomination announcement
+        chopping_block_info = ""
+        if self._chopping_block:
+            current_votes, current_nominee = self._chopping_block
+            chopping_block_info = f" Currently, {current_nominee.name} is on the chopping block with {current_votes} votes."
+        else:
+            chopping_block_info = " The chopping block is currently empty."
+
         self._broadcast_info(sender="Storyteller", 
                              recipients=self._all_players(), 
-                             info=f"{player.name} has nominated {nominee.name} for execution. Their reason is: {action.public_reasoning}",
-                             description=f"{player.name} nominated {nominee.name} for execution.\n\nPublic Reasoning: {action.public_reasoning}]\n\nPrivate Reasoning: {action.private_reasoning}",
+                             info=f"{player.name} has nominated {nominee.name} for execution. Their reason is: {action.public_reasoning}{chopping_block_info}",
+                             description=f"{player.name} nominated {nominee.name} for execution.{chopping_block_info}\n\nPublic Reasoning: {action.public_reasoning}\n\nPrivate Reasoning: {action.private_reasoning}",
                              event_type=EventType.NOMINATION,
-                             metadata={"nominee": nominee.name, "player": player.name, "public_reasoning": action.public_reasoning, "private_reasoning": action.private_reasoning})
+                             metadata={
+                                 "nominee": nominee.name, 
+                                 "player": player.name, 
+                                 "public_reasoning": action.public_reasoning, 
+                                 "private_reasoning": action.private_reasoning,
+                                 "current_chopping_block": {
+                                     "nominee": self._chopping_block[1].name if self._chopping_block else None,
+                                     "votes": self._chopping_block[0] if self._chopping_block else None
+                                 }
+                             })
 
         if self._chopping_block:
             prev_count, _ = self._chopping_block
@@ -937,41 +1008,43 @@ class Game:
         count = 0
         previous_votes: list[tuple[str, Vote]] = []
         for player in self._players:
-            if player.alive:
-                # Check if this player is the Butler and has a master choice
-                butler_master_choice = None
-                if (player.character == Outsider.BUTLER and 
-                    Outsider.BUTLER in self._reminder_tokens and 
-                    ReminderTokens.BUTLER_MASTER in self._reminder_tokens[Outsider.BUTLER]):
-                    butler_master_choice = self._reminder_tokens[Outsider.BUTLER][ReminderTokens.BUTLER_MASTER].name
-                
-                vote = player.vote(
-                    nominee=nominee.name,
-                    public_game_state=self._get_public_game_state(),
-                    current_tally=count,
-                    required_to_tie=required_to_tie,
-                    required_to_nominate=required_to_nominate,
-                    previous_votes=previous_votes,
-                    bulter_player_choice=butler_master_choice
-                )
-                previous_votes.append((player.name, vote))
-                self.event_tracker.add_event(
-                    event_type=EventType.VOTING,
-                    description=f"{player.name} voted {vote.value} on {nominee.name}'s nomination",
-                    round_number=self._round_number,
-                    phase=self._current_phase.value,
-                    participants=[player.name, nominee.name],
-                    metadata={
-                        "voter": player.name,
-                        "nominee": nominee.name,
-                        "vote": vote.value,
-                        "voter_character": player.character.value,
-                        "nominee_character": nominee.character.value
-                    }
-                )
-                
-                if vote == Vote.YES:
-                    count += 1
+            # Check if this player is the Butler and has a master choice
+            butler_master_choice = None
+            if (player.character == Outsider.BUTLER and 
+                Outsider.BUTLER in self._reminder_tokens and 
+                ReminderTokens.BUTLER_MASTER in self._reminder_tokens[Outsider.BUTLER]):
+                butler_master_choice = self._reminder_tokens[Outsider.BUTLER][ReminderTokens.BUTLER_MASTER].name
+            
+            vote = player.vote(
+                nominee=nominee.name,
+                public_game_state=self._get_public_game_state(),
+                current_tally=count,
+                required_to_tie=required_to_tie,
+                required_to_nominate=required_to_nominate,
+                previous_votes=previous_votes,
+                bulter_player_choice=butler_master_choice,
+                nomination_action=action
+            )
+
+            previous_votes.append((player.name, vote))
+            self.event_tracker.add_event(
+                event_type=EventType.VOTING,
+                description=f"{player.name} voted {vote.value} on {nominee.name}'s nomination",
+                round_number=self._round_number,
+                phase=self._current_phase.value,
+                participants=[player.name, nominee.name],
+                public_game_state=self._get_enhanced_game_state_for_logging(),
+                metadata={
+                    "voter": player.name,
+                    "nominee": nominee.name,
+                    "vote": vote.value,
+                    "voter_character": player.character.value,
+                    "nominee_character": nominee.character.value
+                }
+            )
+            
+            if vote == Vote.YES:
+                count += 1
 
         # Track the voting event
         vote_details = [f"{name}: {vote.value}" for name, vote in previous_votes]
@@ -981,41 +1054,25 @@ class Game:
             round_number=self._round_number,
             phase=self._current_phase.value,
             participants=[nominee.name],
+            public_game_state=self._get_enhanced_game_state_for_logging(),
             metadata={"votes": count, "total_voters": len(previous_votes), "vote_details": vote_details}
         )
 
         if count >= required_to_nominate:
             self._chopping_block = (count, nominee)
-            self._broadcast_info("Storyteller", self._all_players(), f"{nominee.name} has been nominated for execution with {count} votes. They will die at the end of the day if no one else is nominated. Vote record: {format_vote_history(previous_votes)}")
+            self._broadcast_info("Storyteller", self._all_players(), f"{nominee.name} has been nominated for execution with {count} votes. They will die at the end of the day if no one else is nominated. Vote record: {format_vote_history(previous_votes)}", 
+                                EventType.NOMINATION_RESULT,
+                                metadata={"nominee": nominee.name, "votes": count, "required": required_to_nominate, "result": "success", "vote_details": [f"{name}: {vote.value}" for name, vote in previous_votes]})
         elif required_to_tie is not None and count == required_to_tie:
             self._chopping_block = None
-            self._broadcast_info("Storyteller", self._all_players(), f"{nominee.name} has received {count} votes. This ties the previous nominee. The chopping block is now empty. Vote record: {format_vote_history(previous_votes)}")
-
-        # Track the end of voting with result
-        if count >= required_to_nominate:
-            vote_result = f"placed on chopping block with {count} votes"
-        elif required_to_tie is not None and count == required_to_tie:
-            vote_result = f"tied previous nominee with {count} votes (chopping block cleared)"
+            self._broadcast_info("Storyteller", self._all_players(), f"{nominee.name} has received {count} votes. This ties the previous nominee. The chopping block is now empty. Vote record: {format_vote_history(previous_votes)}", 
+                                EventType.NOMINATION_RESULT,
+                                metadata={"nominee": nominee.name, "votes": count, "required": required_to_nominate, "result": "tie", "vote_details": [f"{name}: {vote.value}" for name, vote in previous_votes]})
         else:
-            vote_result = f"failed with {count} votes (needed {required_to_nominate})"
-        
-        self.event_tracker.add_event(
-            event_type=EventType.VOTING,
-            description=f"Voting on {nominee.name}'s nomination has ended: {vote_result}",
-            round_number=self._round_number,
-            phase=self._current_phase.value,
-            participants=[nominee.name],
-            metadata={
-                "nominee": nominee.name,
-                "final_vote_count": count,
-                "total_voters": len(previous_votes),
-                "required_to_nominate": required_to_nominate,
-                "required_to_tie": required_to_tie,
-                "on_chopping_block": count >= required_to_nominate,
-                "voting_ended": True,
-                "result": vote_result
-            }
-        )
+            # Failed nomination - not enough votes
+            self._broadcast_info("Storyteller", self._all_players(), f"{nominee.name}'s nomination failed with {count} votes (needed {required_to_nominate}). Vote record: {format_vote_history(previous_votes)}", 
+                                EventType.NOMINATION_RESULT,
+                                metadata={"nominee": nominee.name, "votes": count, "required": required_to_nominate, "result": "failed", "vote_details": [f"{name}: {vote.value}" for name, vote in previous_votes]})
 
         return False
 
@@ -1045,52 +1102,9 @@ class Game:
                 if isinstance(action, MessageAction):
                     self._broadcast_info(player.name, action.recipients, action.message, EventType.MESSAGE)
                 elif isinstance(action, NominationAction):
-                    # Dead players cannot nominate
-                    if not player.alive:
-                        self._broadcast_info("Storyteller", self._all_players(), f"{player.name} cannot nominate (dead players cannot nominate).")
-                        self.event_tracker.add_event(
-                            event_type=EventType.PLAYER_PASS,
-                            description=f"{player.name} passed their turn: dead players cannot nominate",
-                            round_number=self._round_number,
-                            phase=self._current_phase.value,
-                            participants=[player.name],
-                            metadata={"character": player.character.value, "reason": "dead_cannot_nominate"}
-                        )
-                    # Check if nomination is valid before proceeding
-                    elif player.used_nomination:
-                        self._broadcast_info("Storyteller", self._all_players(), f"{player.name} cannot nominate again (already used nomination today).")
-                        self.event_tracker.add_event(
-                            event_type=EventType.PLAYER_PASS,
-                            description=f"{player.name} passed their turn: already used nomination today",
-                            round_number=self._round_number,
-                            phase=self._current_phase.value,
-                            participants=[player.name],
-                            metadata={"character": player.character.value, "reason": "already_nominated"}
-                        )
-                    elif action.nominee not in self._player_dict:
-                        self._broadcast_info("Storyteller", self._all_players(), f"{player.name} cannot nominate {action.nominee} (player not found).")
-                        self.event_tracker.add_event(
-                            event_type=EventType.PLAYER_PASS,
-                            description=f"{player.name} passed their turn: invalid nominee '{action.nominee}'",
-                            round_number=self._round_number,
-                            phase=self._current_phase.value,
-                            participants=[player.name],
-                            metadata={"character": player.character.value, "reason": "invalid_nominee"}
-                        )
-                    elif self._player_dict[action.nominee].nominated_today:
-                        self._broadcast_info("Storyteller", self._all_players(), f"{player.name} cannot nominate {action.nominee} (already nominated today).")
-                        self.event_tracker.add_event(
-                            event_type=EventType.PLAYER_PASS,
-                            description=f"{player.name} passed their turn: {action.nominee} already nominated today",
-                            round_number=self._round_number,
-                            phase=self._current_phase.value,
-                            participants=[player.name],
-                            metadata={"character": player.character.value, "reason": "already_nominated_today"}
-                        )
-                    else:
-                        # Valid nomination - process it
-                        if self._run_nomination(player, action):
-                            return None  # End the day if someone died from the Virgin's power
+                    # Valid nomination - process it
+                    if self._run_nomination(player, action):
+                        return None  # End the day if someone died from the Virgin's power
                 elif isinstance(action, SlayerPowerAction):
                     # Dead players cannot use abilities (but this should be handled by the Player class)
                     if self._slayer_power(player, action):
@@ -1099,15 +1113,10 @@ class Game:
                             return game_over
                 elif isinstance(action, NoAction):
                     # Track when players pass their turn
-                    self._broadcast_info("Storyteller", self._all_players(), f"{player.name} passes their turn. {action.reason}")
-                    self.event_tracker.add_event(
-                        event_type=EventType.PLAYER_PASS,
-                        description=f"{player.name} passed their turn: {action.reason}",
-                        round_number=self._round_number,
-                        phase=self._current_phase.value,
-                        participants=[player.name],
-                        metadata={"character": player.character.value, "reason": action.reason}
-                    )
+                    self._broadcast_info("Storyteller", self._all_players(), f"{player.name} passes their turn. {action.reason}", 
+                                        EventType.PLAYER_PASS,
+                                        description=f"{player.name} passed their turn, reason: {action.reason}",
+                                        metadata={"player": player.name, "character": player.character.value, "reason": action.reason})
 
         # Execute player on chopping block at end of day
         if self._chopping_block is not None:
@@ -1118,6 +1127,7 @@ class Game:
                 round_number=self._round_number,
                 phase=self._current_phase.value,
                 participants=[executed_player.name],
+                public_game_state=self._get_enhanced_game_state_for_logging(),
                 metadata={"character": executed_player.character.value}
             )
             
@@ -1126,7 +1136,6 @@ class Game:
                 self._reminder_tokens[Townsfolk.UNDERTAKER][ReminderTokens.UNDERTAKER_EXECUTED] = executed_player
             
             self._kill_player(executed_player)
-            self._broadcast_info("Storyteller", self._all_players(), f"{executed_player.name} has been executed.", EventType.STORYTELLER_INFO)
             self._chopping_block = None
         else:
             # No execution occurred - check Mayor's win condition
@@ -1158,49 +1167,89 @@ class Game:
             round_number=self._round_number,
             phase=self._current_phase.value,
             participants=[p.name for p in self._players],
+            public_game_state=self._get_enhanced_game_state_for_logging(),
             metadata={"max_rounds": max_rounds, "players": players_info}
         )
         
         logger.info("Initial game state:")
         self._print_status_summary()
         
-        while self._round_number <= max_rounds:
-            self.event_tracker.add_event(
-                event_type=EventType.ROUND_START,
-                description=f"Round {self._round_number} begins",
-                round_number=self._round_number,
-                phase=self._current_phase.value
-            )
-            self.event_tracker.add_event(
-                event_type=EventType.PHASE_CHANGE,
-                description=f"Night phase begins",
-                round_number=self._round_number,
-                phase="NIGHT"
-            )
-            
-            self._run_night_phase()
+        try:
+            while self._round_number <= max_rounds:
+                self.event_tracker.add_event(
+                    event_type=EventType.ROUND_START,
+                    description=f"Round {self._round_number} begins",
+                    round_number=self._round_number,
+                    phase=self._current_phase.value,
+                    public_game_state=self._get_enhanced_game_state_for_logging()
+                )
+                self.event_tracker.add_event(
+                    event_type=EventType.PHASE_CHANGE,
+                    description=f"Night phase begins",
+                    round_number=self._round_number,
+                    phase="NIGHT",
+                    public_game_state=self._get_enhanced_game_state_for_logging()
+                )
+                
+                self._run_night_phase()
 
-            game_over = self._game_over()
-            if game_over:
-                return game_over
-            self.event_tracker.add_event(
-                event_type=EventType.PHASE_CHANGE,
-                description=f"Day phase begins",
-                round_number=self._round_number,
-                phase="DAY"
-            )
-            
-            game_over = self._run_day_phase()
-            if game_over:
-                return game_over
+                game_over = self._game_over()
+                if game_over:
+                    self._end_game(game_over)
+                    return game_over
+                    
+                self.event_tracker.add_event(
+                    event_type=EventType.PHASE_CHANGE,
+                    description=f"Day phase begins",
+                    round_number=self._round_number,
+                    phase="DAY",
+                    public_game_state=self._get_enhanced_game_state_for_logging()
+                )
+                
+                game_over = self._run_day_phase()
+                if game_over:
+                    self._end_game(game_over)
+                    return game_over
 
-            game_over = self._game_over()
-            if game_over:
-                return game_over
-            
-            for player in self._players:
-                player.summarize_history(self._get_public_game_state(), self.event_tracker)
+                game_over = self._game_over()
+                if game_over:
+                    self._end_game(game_over)
+                    return game_over
+                
+                for player in self._players:
+                    player.summarize_history(self._get_public_game_state(), self.event_tracker)
 
-            self._round_number += 1
-               
-        return None
+                self._round_number += 1
+            
+            # Game ended due to max rounds
+            self._end_game(None)
+            return None
+            
+        finally:
+            # Ensure event tracker is always closed
+            self.event_tracker.close()
+            
+    def _end_game(self, winner: Alignment | None) -> None:
+        """Handle game ending procedures"""
+        if winner:
+            description = f"Game ended: {winner.value} team wins!"
+            print(f"\n\033[1;32m🏁 {description}\033[0m")
+        else:
+            description = "Game ended: Maximum rounds reached, no winner"
+            print(f"\n\033[1;33m🏁 {description}\033[0m")
+        
+        # Get API cost summary
+        cost_tracker = get_cost_tracker()
+        cost_summary = cost_tracker.get_summary()
+            
+        self.event_tracker.add_event(
+            event_type=EventType.GAME_END,
+            description=description,
+            round_number=self._round_number,
+            phase=self._current_phase.value,
+            public_game_state=self._get_enhanced_game_state_for_logging(),
+            metadata={
+                "winner": winner.value if winner else None,
+                "api_cost_summary": cost_summary
+            }
+        )

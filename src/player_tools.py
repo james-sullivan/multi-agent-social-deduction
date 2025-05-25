@@ -52,11 +52,11 @@ NOMINATION_TOOL = ToolParam(
             },
             "private_reasoning": {
                 "type": "string",
-                "description": "Your private strategic reasoning for this nomination. This will NOT be shared with other players and can include your true thoughts, team strategy, etc."
+                "description": "Your private strategic reasoning for this nomination. This will NOT be shared with other players and can include your true thoughts, team strategy, etc. Limit of 2 sentences."
             },
             "public_reasoning": {
                 "type": "string", 
-                "description": "The public reasoning you want to share with all other players. This should sound convincing to good players and not reveal your evil nature if you're evil."
+                "description": "The public reasoning you want to share with all other players. Limit of 2 sentences."
             }
         },
         "required": ["player", "private_reasoning", "public_reasoning"]

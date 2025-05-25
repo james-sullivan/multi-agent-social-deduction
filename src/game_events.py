@@ -11,11 +11,13 @@ logger = logging.getLogger(__name__)
 class EventType(Enum):
     """Types of events that can occur in the game"""
     GAME_START = "game_start"
+    GAME_SETUP = "game_setup"
     ROUND_START = "round_start"
     PHASE_CHANGE = "phase_change"
     PLAYER_DEATH = "player_death"
     CHARACTER_POWER = "character_power"  # Keep for backwards compatibility and generic use
     NOMINATION = "nomination"
+    NOMINATION_RESULT = "nomination_result"
     VOTING = "voting"
     EXECUTION = "execution"
     MESSAGE = "message"
@@ -57,19 +59,42 @@ class GameEvent:
     description: str
     participants: Optional[List[str]] = None
     metadata: Optional[Dict[str, Any]] = None
+    public_game_state: Optional[Dict[str, Any]] = None
     
     def __post_init__(self):
         if self.participants is None:
             self.participants = []
         if self.metadata is None:
             self.metadata = {}
+        if self.public_game_state is None:
+            self.public_game_state = {}
 
 class GameEventTracker:
     """Tracks and manages all events during a Blood on the Clocktower game"""
     
-    def __init__(self):
+    def __init__(self, log_filename: Optional[str] = None):
         self.events: List[GameEvent] = []
         self._game_start_time = datetime.now()
+        
+        # Set up JSONL file for streaming events
+        if log_filename is None:
+            timestamp = self._game_start_time.strftime("%Y%m%d_%H%M%S")
+            log_filename = f"game_log_{timestamp}.jsonl"
+        
+        # Ensure the logs directory exists
+        logs_dir = Path("logs")
+        logs_dir.mkdir(exist_ok=True)
+        self._log_file_path = logs_dir / log_filename
+        
+        # Open file for writing
+        self._log_file = open(self._log_file_path, 'w', encoding='utf-8')
+        logger.info(f"Game event log will be written to: {self._log_file_path}")
+        print(f"\033[1;32m📁 Game events will be logged to: {self._log_file_path}\033[0m")
+        
+    def __del__(self):
+        """Ensure the log file is closed when the tracker is destroyed"""
+        if hasattr(self, '_log_file') and self._log_file and not self._log_file.closed:
+            self._log_file.close()
         
     def add_event(self, 
                   event_type: EventType,
@@ -77,8 +102,9 @@ class GameEventTracker:
                   round_number: int,
                   phase: str,
                   participants: Optional[List[str]] = None,
-                  metadata: Optional[Dict[str, Any]] = None) -> None:
-        """Add a new event to the tracker"""
+                  metadata: Optional[Dict[str, Any]] = None,
+                  public_game_state: Optional[Dict[str, Any]] = None) -> None:
+        """Add a new event to the tracker and write it immediately to JSONL file"""
         event = GameEvent(
             timestamp=datetime.now().isoformat(),
             round_number=round_number,
@@ -86,21 +112,40 @@ class GameEventTracker:
             event_type=event_type,
             description=description,
             participants=participants or [],
-            metadata=metadata or {}
+            metadata=metadata or {},
+            public_game_state=public_game_state or {}
         )
         self.events.append(event)
         self._print_event(event)
+        self._write_event_to_jsonl(event)
+        
+    def _write_event_to_jsonl(self, event: GameEvent) -> None:
+        """Write a single event to the JSONL file"""
+        try:
+            # Convert event to dictionary for JSON serialization
+            event_dict = asdict(event)
+            # Convert enum to string
+            event_dict['event_type'] = event.event_type.value
+            
+            # Write as single line JSON
+            json_line = json.dumps(event_dict, ensure_ascii=False)
+            self._log_file.write(json_line + '\n')
+            self._log_file.flush()  # Ensure immediate write to disk
+        except Exception as e:
+            logger.error(f"Failed to write event to JSONL file: {e}")
         
     def _print_event(self, event: GameEvent) -> None:
         """Print an event in an elegant format"""
         # Color codes for different event types
         colors = {
             EventType.GAME_START: "\033[1;32m",      # Bold green
+            EventType.GAME_SETUP: "\033[1;92m",      # Bright green
             EventType.ROUND_START: "\033[1;34m",     # Bold blue
             EventType.PHASE_CHANGE: "\033[1;36m",    # Bold cyan
             EventType.PLAYER_DEATH: "\033[1;31m",    # Bold red
             EventType.CHARACTER_POWER: "\033[1;35m", # Bold magenta
             EventType.NOMINATION: "\033[1;33m",      # Bold yellow
+            EventType.NOMINATION_RESULT: "\033[1;93m", # Bright yellow
             EventType.VOTING: "\033[0;33m",          # Yellow
             EventType.EXECUTION: "\033[1;31m",       # Bold red
             EventType.MESSAGE: "\033[0;37m",         # White
@@ -141,11 +186,13 @@ class GameEventTracker:
         # Create prefix based on event type
         prefix_map = {
             EventType.GAME_START: "🎮 GAME",
+            EventType.GAME_SETUP: "⚙️  SETUP",
             EventType.ROUND_START: "🌅 ROUND",
             EventType.PHASE_CHANGE: "🌙 PHASE",
             EventType.PLAYER_DEATH: "💀 DEATH",
             EventType.CHARACTER_POWER: "✨ POWER",
             EventType.NOMINATION: "⚖️ NOMINATION",
+            EventType.NOMINATION_RESULT: "✅ VOTE RESULT",
             EventType.VOTING: "🗳️ VOTE",
             EventType.EXECUTION: "⚔️ EXECUTION",
             EventType.MESSAGE: "💬 MESSAGE",
@@ -240,8 +287,41 @@ class GameEventTracker:
                 print(f"  [{time_str}] {event.description}")
         print()
         
+    def close(self) -> str:
+        """Close the JSONL file and return the file path"""
+        if hasattr(self, '_log_file') and self._log_file and not self._log_file.closed:
+            self._log_file.close()
+            print(f"\033[1;32m📁 Game log completed: {self._log_file_path}\033[0m")
+        return str(self._log_file_path)
+        
+    def save_to_jsonl(self, filename: Optional[str] = None) -> str:
+        """Save all events to a JSONL file (for compatibility, since events are already being written)"""
+        if filename is None:
+            # Events are already being written to the current file
+            return str(self._log_file_path)
+        
+        # If a different filename is requested, create a copy
+        logs_dir = Path("logs")
+        logs_dir.mkdir(exist_ok=True)
+        filepath = logs_dir / filename
+        
+        try:
+            with open(filepath, 'w', encoding='utf-8') as f:
+                for event in self.events:
+                    event_dict = asdict(event)
+                    event_dict['event_type'] = event.event_type.value
+                    json_line = json.dumps(event_dict, ensure_ascii=False)
+                    f.write(json_line + '\n')
+            
+            logger.info(f"Game events saved to {filepath}")
+            print(f"\033[1;32m📁 Game log saved to: {filepath}\033[0m")
+            return str(filepath)
+        except Exception as e:
+            logger.error(f"Failed to save game events to JSONL: {e}")
+            raise
+    
     def save_to_json(self, filename: Optional[str] = None) -> str:
-        """Save all events to a JSON file"""
+        """Save all events to a JSON file (legacy format)"""
         if filename is None:
             timestamp = self._game_start_time.strftime("%Y%m%d_%H%M%S")
             filename = f"game_log_{timestamp}.json"
@@ -308,4 +388,86 @@ class GameEventTracker:
                 if event.participants and len(event.participants) >= 2:
                     stats["nominations"].append(f"{event.participants[0]} → {event.participants[1]}")
                     
-        return stats 
+        return stats
+        
+def load_events_from_jsonl(filepath: str) -> List[GameEvent]:
+    """Load events from a JSONL file"""
+    events = []
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            for line_num, line in enumerate(f, 1):
+                line = line.strip()
+                if not line:
+                    continue
+                    
+                try:
+                    event_dict = json.loads(line)
+                    # Convert event_type string back to enum
+                    event_dict['event_type'] = EventType(event_dict['event_type'])
+                    
+                    # Create GameEvent from dict (need to handle optional fields)
+                    event = GameEvent(
+                        timestamp=event_dict['timestamp'],
+                        round_number=event_dict['round_number'],
+                        phase=event_dict['phase'],
+                        event_type=event_dict['event_type'],
+                        description=event_dict['description'],
+                        participants=event_dict.get('participants', []),
+                        metadata=event_dict.get('metadata', {}),
+                        public_game_state=event_dict.get('public_game_state', {})
+                    )
+                    events.append(event)
+                    
+                except json.JSONDecodeError as e:
+                    logger.error(f"Invalid JSON on line {line_num} in {filepath}: {e}")
+                except (KeyError, ValueError) as e:
+                    logger.error(f"Invalid event data on line {line_num} in {filepath}: {e}")
+                    
+    except FileNotFoundError:
+        logger.error(f"JSONL file not found: {filepath}")
+    except Exception as e:
+        logger.error(f"Error reading JSONL file {filepath}: {e}")
+        
+    return events
+
+def get_game_statistics_from_jsonl(filepath: str) -> Dict[str, Any]:
+    """Generate game statistics directly from a JSONL file without loading all events into memory"""
+    stats: Dict[str, Any] = {
+        "total_events": 0,
+        "total_rounds": 0,
+        "events_by_type": {},
+        "deaths": [],
+        "executions": [],
+        "nominations": [],
+    }
+    
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                    
+                try:
+                    event_dict = json.loads(line)
+                    stats["total_events"] += 1
+                    stats["total_rounds"] = max(stats["total_rounds"], event_dict.get('round_number', 0))
+                    
+                    event_type = event_dict.get('event_type', 'unknown')
+                    stats["events_by_type"][event_type] = stats["events_by_type"].get(event_type, 0) + 1
+                    
+                    participants = event_dict.get('participants', [])
+                    if event_type == 'player_death' and participants:
+                        stats["deaths"].append(participants[0])
+                    elif event_type == 'execution' and participants:
+                        stats["executions"].append(participants[0])
+                    elif event_type == 'nomination' and len(participants) >= 2:
+                        stats["nominations"].append(f"{participants[0]} → {participants[1]}")
+                        
+                except json.JSONDecodeError:
+                    continue  # Skip invalid lines
+                    
+    except Exception as e:
+        logger.error(f"Error analyzing JSONL file {filepath}: {e}")
+        
+    return stats 

@@ -9,6 +9,7 @@ from scripts import Script, TROUBLE_BREWING
 from game import Game
 from game_enums import Alignment
 from game_events import EventType
+from inference import reset_cost_tracker, get_cost_tracker
 
 # Load environment variables from parent directory
 load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
@@ -68,10 +69,10 @@ def create_game(config, debug=False):
     # Define the 5 characters for our simple game
     characters = [
         Demon.IMP,           # The evil demon who kills at night
-        Minion.POISONER,     # Can poison players to disable their abilities
-        Townsfolk.MAYOR,     # Can win if 3 players remain with no execution
-        Townsfolk.EMPATH,    # Learns how many evil neighbors they have
-        Townsfolk.SLAYER,    # Can attempt to slay the demon during the day
+        Minion.SPY,     # Can poison players to disable their abilities
+        Townsfolk.SLAYER,     # Can win if 3 players remain with no execution
+        Townsfolk.FORTUNETELLER,    # Learns how many evil neighbors they have
+        Townsfolk.UNDERTAKER,    # Can attempt to slay the demon during the day
     ]
     
     print("🎭 Starting a Simple 5-Player Blood on the Clocktower Game!")
@@ -100,6 +101,9 @@ def run_game(config_name="default", debug=False):
     """Initialize and run a Blood on the Clocktower game"""
     logger.info(f"Initializing new Blood on the Clocktower game with config: {config_name}")
     
+    # Reset cost tracking for this game session
+    reset_cost_tracker()
+    
     # Load configuration
     config = load_config(config_name)
     
@@ -117,20 +121,14 @@ def run_game(config_name="default", debug=False):
     else:
         result_str = "Game ended in a draw or reached maximum rounds."
     
-    # Track game end event
-    game.event_tracker.add_event(
-        event_type=EventType.GAME_END,
-        description=result_str,
-        round_number=game._round_number,
-        phase=game._current_phase.value,
-        metadata={"result": result.value if result else "Max Rounds"}
-    )
-    
     logger.info(f"Game completed: {result_str}")
     
-    # Save events to JSON file
+    # Print game summary
     try:
-        game.event_tracker.save_to_json()
+        # Get cost summary
+        cost_tracker = get_cost_tracker()
+        cost_summary = cost_tracker.get_summary()
+        
         print("\n🎯 Game Summary:")
         stats = game.event_tracker.get_game_statistics()
         print(f"   • Total rounds: {stats['total_rounds']}")
@@ -138,9 +136,38 @@ def run_game(config_name="default", debug=False):
         print(f"   • Deaths: {len(stats['deaths'])} players")
         print(f"   • Executions: {len(stats['executions'])} players")
         print(f"   • Nominations: {len(stats['nominations'])}")
+        
+        # Add cost information
+        print(f"\n💰 API Cost Summary:")
+        if cost_summary['cost_incomplete']:
+            print(f"   ⚠️  Warning: Cost calculation incomplete (unknown models: {', '.join(cost_summary['unknown_models'])})")
+        print(f"   • Total cost: ${cost_summary['total_cost_usd']:.4f}")
+        print(f"   • API calls: {cost_summary['total_api_calls']}")
+        print(f"   • Input tokens: {cost_summary['total_input_tokens']:,}")
+        print(f"   • Output tokens: {cost_summary['total_output_tokens']:,}")
+        print(f"   • Cache writes: {cost_summary['total_cache_creation_tokens']:,}")
+        print(f"   • Cache reads: {cost_summary['total_cache_read_tokens']:,}")
+        if cost_summary['total_cache_read_tokens'] > 0 or cost_summary['total_cache_creation_tokens'] > 0:
+            savings = cost_summary['cache_savings_usd']
+            print(f"   • Cache savings: ${savings:.4f}")
+        
+        # Show per-model breakdown if multiple models used
+        if len(cost_summary['models_used']) > 1:
+            print(f"   • Model breakdown:")
+            for model, usage in cost_summary['models_used'].items():
+                cost_str = f"${usage['cost_usd']:.4f}" if usage['pricing_available'] else "unknown cost"
+                print(f"     - {model}: {cost_str} ({usage['calls']} calls)")
+        elif len(cost_summary['models_used']) == 1:
+            # Show single model details
+            model, usage = list(cost_summary['models_used'].items())[0]
+            if not usage['pricing_available']:
+                print(f"   • Model: {model} (pricing unavailable)")
+        
+        print(f"\n{result_str}")
     except Exception as e:
-        logger.error(f"Failed to save game events: {e}")
-        print(f"⚠️  Warning: Could not save game log - {e}")
+        logger.error(f"Failed to generate game statistics: {e}")
+        print(f"⚠️  Warning: Could not generate game summary - {e}")
+        print(f"\n{result_str}")
     
     return result_str
 
@@ -163,5 +190,4 @@ if __name__ == "__main__":
         exit(1)
     
     # Run the game with specified configuration
-    result = run_game(args.config, debug=args.debug)
-    print(result) 
+    result = run_game(args.config, debug=args.debug) 

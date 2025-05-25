@@ -44,12 +44,14 @@ class MessageAction(DayAction):
 @dataclass
 class NominationAction(DayAction):
     nominee: str
+    nominator: str
     private_reasoning: str
     public_reasoning: str
     
-    def __init__(self, nominee: str, private_reasoning: str, public_reasoning: str):
+    def __init__(self, nominee: str, nominator: str, private_reasoning: str, public_reasoning: str):
         super().__init__(DayActions.NOMINATION, private_reasoning)  # Use private reasoning as the internal reason
         self.nominee = nominee
+        self.nominator = nominator
         self.private_reasoning = private_reasoning
         self.public_reasoning = public_reasoning
 
@@ -90,25 +92,36 @@ class Player:
     def give_info(self, info: str) -> None:
         self.history.append(info)
 
-    def _get_static_system_prefix(self, character_info: str) -> str:
-        """Get the static prefix of the system prompt that can be cached.
-        
-        This includes rules, character descriptions, and player identity - 
-        content that doesn't change during the game.
-        """
-        return f"""<rules>
+    def _get_cached_system_prompt(self, public_game_state: PublicGameState) -> list[str]:
+        """Get the cached system prompt (rules, characters, and identity) - cacheable."""
+        rules_and_chars = f"""<rules>
 {BOTC_RULES}
 </rules>
 
 <characters>
-{character_info}
-</characters>
-"""
+{public_game_state.character_str}
+</characters>"""
 
-    def _get_dynamic_system_content(self, public_game_state: PublicGameState) -> str:
-        """Get the dynamic part of the system prompt that changes frequently."""
-        game_state = "Here is the publicly available player state in the order they are sitting in:" + ", ".join([json.dumps(player) for player in public_game_state.player_state])
         seating_explanation = f"The seating order is important for several game mechanics such as voting order and character abilities. The seat adjacency wraps from the first to the last. For example, {public_game_state.player_state[0]['name']} is adjacent to {public_game_state.player_state[-1]['name']} and {public_game_state.player_state[1]['name']}."
+
+        player_info = f"""<seating_explanation>
+{seating_explanation}
+</seating_explanation>
+
+<player_identity>
+You are a player in Blood on the Clocktower.
+Your name is {self.name}.
+Your character is {self.character.value if self.drunk_character is None else self.drunk_character.value}. 
+You are on the {self.alignment.name} team.
+Remember to always act according to your character's abilities and your team's win condition. Analyze the current game state carefully before making decisions.
+</player_identity>"""
+
+        return [rules_and_chars, player_info]
+
+    def _get_dynamic_system_prompt(self, public_game_state: PublicGameState) -> str:
+        """Get the dynamic system prompt (current state, chopping block, nominations, player state) - changes frequently."""
+        # Add player state information
+        player_state = "Here is the publicly available player state in the order they are sitting in:" + ", ".join([json.dumps(player) for player in public_game_state.player_state])
         
         # Add chopping block information
         chopping_block_info = ""
@@ -124,14 +137,9 @@ class Player:
         else:
             nomination_info = "No players can currently be nominated."
 
-        return f"""
-<player_identity>
-You are a player in Blood on the Clocktower.
-Your name is {self.name}.
-Your character is {self.character.value if self.drunk_character is None else self.drunk_character.value}. 
-You are on the {self.alignment.name} team.
-Remember to always act according to your character's abilities and your team's win condition. Analyze the current game state carefully before making decisions.
-</player_identity>
+        return f"""<player_order>
+{player_state}
+</player_order>
 
 <current_state>
 It is round {public_game_state.round_number} and the current phase is {public_game_state.current_phase}.
@@ -141,22 +149,19 @@ You have {self.messages_left} messages left that you can send today.
 </current_state>
 
 <game_state>
-{game_state}
-{seating_explanation}
 {chopping_block_info}
 {nomination_info}
 </game_state>
 
 <notes>
 {self.notes}
-</notes>
+</notes>"""
 
-<history>
+    def _get_history_prompt(self) -> str:
+        """Get the history prompt - not cached since it changes frequently."""
+        return f"""<history>
 {"\n".join(self.history)}
 </history>"""
-
-
-
 
 
     def summarize_history(self, public_game_state: PublicGameState, event_tracker=None) -> None:
@@ -170,8 +175,11 @@ You have {self.messages_left} messages left that you can send today.
         
         response = request_llm_response(
             user_message=user_message,
-            static_system_prefix=self._get_static_system_prefix(public_game_state.character_str),
-            dynamic_system_content=self._get_dynamic_system_content(public_game_state)
+            cached_system_prompt_strs=self._get_cached_system_prompt(public_game_state),
+            non_cached_system_prompt_strs=[
+                self._get_dynamic_system_prompt(public_game_state),
+                self._get_history_prompt()
+            ]
         )
         
         if isinstance(response, str):
@@ -199,7 +207,8 @@ You have {self.messages_left} messages left that you can send today.
              current_tally: int,
              required_to_tie: int | None,
              required_to_nominate: int,
-             previous_votes: list[tuple[str, Vote]], 
+             previous_votes: list[tuple[str, Vote]],
+             nomination_action: NominationAction,
              bulter_player_choice: str | None = None) -> Vote:
         
         if not self.alive and self.used_dead_vote:
@@ -218,7 +227,13 @@ You have {self.messages_left} messages left that you can send today.
                     break
             if not found_player:
                 return Vote.NO
-            
+
+        # Nominator context
+        if nomination_action.nominator == self.name:
+            nominator_context = f"You are the nominator and your private reasoning is:\n{nomination_action.private_reasoning}"
+        else:
+            nominator_context = f"The nominator is {nomination_action.nominator} and their reason is:\n{nomination_action.public_reasoning}"
+
         # Get the player's vote based on the game state and previous votes
         if nominee == self.name:
             nominee_context = "You are the nominee for execution. "
@@ -237,6 +252,7 @@ You have {self.messages_left} messages left that you can send today.
         
         user_message = f"""
 You need to vote on the current nomination.
+{nominator_context}
 {nominee_context}
 {current_tally} votes have been cast so far.
 {required_votes_context}
@@ -249,9 +265,12 @@ IMPORTANT: You must respond with ONLY the word 'YES' or 'NO' - nothing else. Do 
         
         response = request_llm_response(
             user_message=user_message,
-            static_system_prefix=self._get_static_system_prefix(public_game_state.character_str),
-            dynamic_system_content=self._get_dynamic_system_content(public_game_state),
-            max_tokens=10  # Reduce max tokens to discourage long responses
+            cached_system_prompt_strs=self._get_cached_system_prompt(public_game_state),
+            non_cached_system_prompt_strs=[
+                self._get_dynamic_system_prompt(public_game_state),
+                self._get_history_prompt()
+            ],
+            max_tokens=5  # Reduce max tokens to discourage long responses
         )
         
         # Ensure response is a string and convert to uppercase
@@ -298,12 +317,15 @@ IMPORTANT: You must respond with ONLY the word 'YES' or 'NO' - nothing else. Do 
         # Always add the pass tool as an option when other tools are available
         # available_tools.append(PASS_TOOL)
 
-        user_message = "It is your turn to either take an action or pass. What do you want to do?"
+        user_message = "It is your turn to either take an action or pass. Consider your character's abilities, what team you are on, what your teammates are doing and how you can help your team win. What do you want to do?"
         
         response = request_llm_response(
             user_message=user_message,
-            static_system_prefix=self._get_static_system_prefix(public_game_state.character_str),
-            dynamic_system_content=self._get_dynamic_system_content(public_game_state),
+            cached_system_prompt_strs=self._get_cached_system_prompt(public_game_state),
+            non_cached_system_prompt_strs=[
+                self._get_dynamic_system_prompt(public_game_state),
+                self._get_history_prompt()
+            ],
             tools=available_tools
         )
         
@@ -322,7 +344,7 @@ IMPORTANT: You must respond with ONLY the word 'YES' or 'NO' - nothing else. Do 
                 player = arguments.get("player", "")
                 private_reasoning = arguments.get("private_reasoning", "No private reasoning provided")
                 public_reasoning = arguments.get("public_reasoning", "No public reasoning provided")
-                return NominationAction(player, private_reasoning, public_reasoning)
+                return NominationAction(player, self.name, private_reasoning, public_reasoning)
                 
             elif function_name == "slayer_power":
                 target = arguments.get("target", "")
@@ -342,8 +364,11 @@ IMPORTANT: You must respond with ONLY the word 'YES' or 'NO' - nothing else. Do 
 
         response = request_llm_response(
             user_message=user_message,
-            static_system_prefix=self._get_static_system_prefix(public_game_state.character_str),
-            dynamic_system_content=self._get_dynamic_system_content(public_game_state),
+            cached_system_prompt_strs=self._get_cached_system_prompt(public_game_state),
+            non_cached_system_prompt_strs=[
+                self._get_dynamic_system_prompt(public_game_state),
+                self._get_history_prompt()
+            ],
             tools=[]
         )
 
