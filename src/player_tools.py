@@ -39,29 +39,35 @@ SLAYER_TOOL = ToolParam(
     }
 )
 
-# Nomination tool for eliminating players
-NOMINATION_TOOL = ToolParam(
-    name="nominate",
-    description="Nominate a player for execution. This will start a vote to execute the nominated player. You can only nominate once per day and each player can only be nominated once per day. If you nominate, make sure the player you select has not been nominated yet today. You must provide both private reasoning (for your own strategic thinking) and public reasoning (what others will hear).",
-    input_schema={
-        "type": "object",
-        "properties": {
-            "player": {
-                "type": "string",
-                "description": "The player to nominate for execution. If you want to nominate Susan, you would put 'Susan' here."
+def get_nomination_tool(nominatable_players: list[str]) -> ToolParam:
+    """Generate a nomination tool with the current list of nominatable players."""
+    players_list = ", ".join(nominatable_players)
+    
+    return ToolParam(
+        name="nominate",
+        description="Nominate a player for execution. This will start a vote to execute the nominated player. You can only nominate once per day and each player can only be nominated once per day. You must provide both private reasoning (for your own strategic thinking) and public reasoning (what others will hear).",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "player": {
+                    "type": "string",
+                    "description": f"The player to nominate for execution. Must be one of: {players_list}"
+                },
+                "private_reasoning": {
+                    "type": "string",
+                    "description": "Your private strategic reasoning for this nomination. This will NOT be shared with other players and can include your true thoughts, team strategy, etc. Limit of 2 sentences."
+                },
+                "public_reasoning": {
+                    "type": "string", 
+                    "description": "The public reasoning you want to share with all other players. Limit of 2 sentences."
+                }
             },
-            "private_reasoning": {
-                "type": "string",
-                "description": "Your private strategic reasoning for this nomination. This will NOT be shared with other players and can include your true thoughts, team strategy, etc. Limit of 2 sentences."
-            },
-            "public_reasoning": {
-                "type": "string", 
-                "description": "The public reasoning you want to share with all other players. Limit of 2 sentences."
-            }
-        },
-        "required": ["player", "private_reasoning", "public_reasoning"]
-    }
-)
+            "required": ["player", "private_reasoning", "public_reasoning"]
+        }
+    )
+
+# Static nomination tool for backwards compatibility (will be replaced by dynamic version)
+NOMINATION_TOOL = get_nomination_tool([])
 
 PASS_TOOL = ToolParam(
     name="pass",

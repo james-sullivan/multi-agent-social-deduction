@@ -304,11 +304,11 @@ class Game:
     
     def _print_status_summary(self) -> None:
         """Print a summary of each character's role and status"""
-        summary = "\n" + "=" * 85
-        summary += "\n                         CHARACTER STATUS SUMMARY"
-        summary += "\n" + "=" * 85
-        summary += "\nName        | Role       | Status | Drunk/Poisoned | Dead Vote"
-        summary += "\n" + "-" * 85
+        summary = "\n" + "=" * 95
+        summary += "\n                            CHARACTER STATUS SUMMARY"
+        summary += "\n" + "=" * 95
+        summary += "\nName         | Role            | Status | Drunk/Poisoned | Dead Vote"
+        summary += "\n" + "-" * 95
         
         # Use seating order (original order in self._players)
         for player in self._players:
@@ -322,9 +322,9 @@ class Game:
             drunk_poisoned = "YES" if self._is_drunk_or_poisoned(player) else "NO"
             
             # Format with consistent spacing
-            summary += f"\n{player.name:<12}| {player.character.value:<10} | {status:<6} | {drunk_poisoned:<14} | {dead_vote}"
+            summary += f"\n{player.name:<12} | {player.character.value:<15} | {status:<6} | {drunk_poisoned:<14} | {dead_vote}"
         
-        summary += "\n" + "=" * 85
+        summary += "\n" + "=" * 95
         
         # Print directly to console with color formatting
         # but don't also log it (which would cause duplicate output)
@@ -783,6 +783,37 @@ class Game:
             return False
         
         return True
+
+    def _no_productive_nominations_left(self) -> bool:
+        """
+        Check if nominations are open but there are no productive nominations left to make.
+        A productive nomination is one where a player can nominate someone other than themselves.
+        Returns True if we should end the day early due to lack of productive nominations.
+        """
+        # Only relevant if nominations are open
+        if not self._nominations_open:
+            return False
+        
+        # Get players who haven't used their nomination yet
+        players_who_can_nominate = [
+            player for player in self._players 
+            if player.alive and not player.used_nomination
+        ]
+        
+        # Get players who can be nominated (haven't been nominated today)
+        players_who_can_be_nominated = [
+            player for player in self._players 
+            if not player.nominated_today
+        ]
+        
+        # Check if any player can make a productive nomination (nominate someone other than themselves)
+        for nominator in players_who_can_nominate:
+            for nominee in players_who_can_be_nominated:
+                if nominator != nominee:  # Can't nominate yourself productively
+                    return False  # Found at least one productive nomination possible
+        
+        # No productive nominations are possible
+        return True
     
     def _clear_night_tokens(self) -> None:
         """Clear reminder tokens that should only last for one night"""
@@ -1093,6 +1124,10 @@ class Game:
                 self._nominations_open = True
                 self._broadcast_info("Storyteller", self._all_players(), "Nominations are now open.", EventType.STORYTELLER_INFO)
         
+            # Check if we should end the day early due to no productive nominations left
+            if self._no_productive_nominations_left():
+                break
+        
             day_players: list[Player] = list(self._players)
             random.shuffle(day_players)
 
@@ -1117,6 +1152,10 @@ class Game:
                                         EventType.PLAYER_PASS,
                                         description=f"{player.name} passed their turn, reason: {action.reason}",
                                         metadata={"player": player.name, "character": player.character.value, "reason": action.reason})
+                
+            # Check again after each player's action in case nominations became unproductive
+            if self._no_productive_nominations_left():
+                break
 
         # Execute player on chopping block at end of day
         if self._chopping_block is not None:

@@ -8,7 +8,7 @@ if TYPE_CHECKING:
     from game import PublicGameState
 import json
 from anthropic.types import ToolParam
-from player_tools import MESSAGE_TOOL, SLAYER_TOOL, NOMINATION_TOOL, PASS_TOOL
+from player_tools import MESSAGE_TOOL, SLAYER_TOOL, NOMINATION_TOOL, PASS_TOOL, get_nomination_tool
 from enum import Enum
 from prompts import BOTC_RULES
 from scripts import TROUBLE_BREWING_CHARACTERS
@@ -296,7 +296,7 @@ IMPORTANT: You must respond with ONLY the word 'YES' or 'NO' - nothing else. Do 
         available_tools: List[ToolParam] = []
 
         if nominations_open and not self.used_nomination and self.alive:
-            available_tools.append(NOMINATION_TOOL)
+            available_tools.append(get_nomination_tool(public_game_state.nominatable_players))
 
         action_to_tool = { 
             DayActions.SLAYER_POWER: SLAYER_TOOL,

@@ -315,7 +315,7 @@ def log_cache_metrics(usage: Any, cache_enabled: bool, model: str) -> CacheMetri
 
 def request_llm_response(
     user_message: str,
-    model: str = "claude-sonnet-4-20250514",
+    model: str = "claude-3-5-haiku-20241022",
     max_tokens: int = 1024,
     tools: Optional[List[ToolParam]] = None,
     cache_tools: bool = True,
