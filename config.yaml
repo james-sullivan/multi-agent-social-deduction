@@ -5,6 +5,7 @@ default:
   minion_count: 1
   max_rounds: 6
   random_seed: null
+  model: "claude-3-5-haiku-20241022"
 
 small_game:
   script: "trouble_brewing"
@@ -13,6 +14,7 @@ small_game:
   minion_count: 1
   max_rounds: 6
   random_seed: null
+  model: "claude-3-5-haiku-20241022"
 
 large_game:
   script: "trouble_brewing"
@@ -21,6 +23,7 @@ large_game:
   minion_count: 2
   max_rounds: 8
   random_seed: null
+  model: "claude-3-5-haiku-20241022"
 
 test_game:
   script: "trouble_brewing"
@@ -28,4 +31,5 @@ test_game:
   outsider_count: 0
   minion_count: 1
   max_rounds: 4
-  random_seed: 42 
+  random_seed: 42
+  model: "claude-3-5-haiku-20241022" 

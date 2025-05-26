@@ -8,7 +8,7 @@ if TYPE_CHECKING:
     from game import PublicGameState
 import json
 from anthropic.types import ToolParam
-from player_tools import MESSAGE_TOOL, SLAYER_TOOL, NOMINATION_TOOL, PASS_TOOL, get_nomination_tool
+from player_tools import MESSAGE_TOOL, SLAYER_TOOL, NOMINATION_TOOL, PASS_TOOL, VOTE_TOOL, get_nomination_tool
 from enum import Enum
 from prompts import BOTC_RULES
 from scripts import TROUBLE_BREWING_CHARACTERS
@@ -22,6 +22,7 @@ class DayActions(Enum):
     MESSAGE = "message"
     NOMINATION = "nomination"
     SLAYER_POWER = "slayer_power"
+    VOTE = "vote"
     NO_ACTION = "no_action"
 
 ONCE_PER_GAME_ACTIONS = [DayActions.SLAYER_POWER]
@@ -64,13 +65,25 @@ class SlayerPowerAction(DayAction):
         self.target = target
 
 @dataclass
+class VoteAction(DayAction):
+    vote: Vote
+    private_reasoning: str
+    public_reasoning: str
+    
+    def __init__(self, vote: Vote, private_reasoning: str, public_reasoning: str):
+        super().__init__(DayActions.VOTE, private_reasoning)  # Use private reasoning as internal reason
+        self.vote = vote
+        self.private_reasoning = private_reasoning
+        self.public_reasoning = public_reasoning
+
+@dataclass
 class NoAction(DayAction):
     def __init__(self, reason: str = "No action taken"):
         super().__init__(DayActions.NO_ACTION, reason)
 
 
 class Player:
-    def __init__(self, name: str, alignment: Alignment, character: Character, drunk_character: Character | None = None) -> None:
+    def __init__(self, name: str, alignment: Alignment, character: Character, drunk_character: Character | None = None, model: str = "claude-3-5-haiku-20241022") -> None:
         self.name: str = name
         self.alive: bool = True
         self.history: list[str] = []
@@ -78,16 +91,15 @@ class Player:
         self.alignment: Alignment = alignment
         self.character: Character = character
         self.used_once_per_game: dict[DayActions, bool] = {action: False for action in ONCE_PER_GAME_ACTIONS}
-        self.messages_left: int = 2
         self.used_nomination: bool = False
         self.nominated_today: bool = False
         self.used_dead_vote: bool = False
         self.drunk_character: Character | None = None
+        self.model: str = model
 
     def start_of_day(self) -> None:
         self.used_nomination = False
         self.nominated_today = False
-        self.messages_left = 2
 
     def give_info(self, info: str) -> None:
         self.history.append(info)
@@ -144,8 +156,7 @@ Remember to always act according to your character's abilities and your team's w
 <current_state>
 It is round {public_game_state.round_number} and the current phase is {public_game_state.current_phase}.
 You are {'alive' if self.alive else f'dead and you have {'not' if not self.used_dead_vote else ''} used your dead vote'}. 
-You have {"not" if self.used_nomination else ""} nominated today. 
-You have {self.messages_left} messages left that you can send today.
+You have {"not" if self.used_nomination else ""} nominated today.
 </current_state>
 
 <game_state>
@@ -175,6 +186,7 @@ You have {self.messages_left} messages left that you can send today.
         
         response = request_llm_response(
             user_message=user_message,
+            model=self.model,
             cached_system_prompt_strs=self._get_cached_system_prompt(public_game_state),
             non_cached_system_prompt_strs=[
                 self._get_dynamic_system_prompt(public_game_state),
@@ -190,13 +202,22 @@ You have {self.messages_left} messages left that you can send today.
         # Track the notes update event if tracker is provided
         if event_tracker:
             from game_events import EventType
+            
+            # Get game statistics from the event tracker
+            game_stats = event_tracker.get_game_statistics()
+            
             event_tracker.add_event(
                 event_type=EventType.NOTES_UPDATE,
                 description=f"{self.name} updated their notes",
                 round_number=public_game_state.round_number,
                 phase=public_game_state.current_phase.value,
                 participants=[self.name],
-                metadata={"character": self.character.value, "notes": self.notes}
+                metadata={
+                    "player_name": self.name, 
+                    "character": self.character.value, 
+                    "notes": self.notes,
+                    "game_statistics": game_stats
+                }
             )
 
         self.history = []
@@ -207,26 +228,30 @@ You have {self.messages_left} messages left that you can send today.
              current_tally: int,
              required_to_tie: int | None,
              required_to_nominate: int,
-             previous_votes: list[tuple[str, Vote]],
+             previous_votes: list[tuple[str, Vote, str, str]],  # Now includes private and public reasoning
              nomination_action: NominationAction,
-             bulter_player_choice: str | None = None) -> Vote:
+                            butler_player_choice: str | None = None) -> tuple[Vote, str, str]:
+        """
+        Use the voting tool to get the player's vote and reasoning.
+        Returns a tuple of (Vote, private_reasoning, public_reasoning).
+        """
         
         if not self.alive and self.used_dead_vote:
-            return Vote.CANT_VOTE
+            return Vote.CANT_VOTE, "Cannot vote - already used dead vote", "Cannot vote - already used dead vote"
 
         # The butler cannot vote if the player they chose didn't vote yes
-        if bulter_player_choice:
+        if butler_player_choice:
             found_player = False
             # Find the butler's player choice in previous votes
-            for player, vote in previous_votes:
-                if player == bulter_player_choice:
+            for player_name, vote, _, _ in previous_votes:
+                if player_name == butler_player_choice:
                     # If the butler's choice didn't vote yes, we vote no
                     if vote != Vote.YES:
-                        return Vote.NO
+                        return Vote.NO, "Butler restriction - master didn't vote yes", "Butler restriction - master didn't vote yes"
                     found_player = True
                     break
             if not found_player:
-                return Vote.NO
+                return Vote.NO, "Butler restriction - master hasn't voted yet", "Butler restriction - master hasn't voted yet"
 
         # Nominator context
         if nomination_action.nominator == self.name:
@@ -236,19 +261,21 @@ You have {self.messages_left} messages left that you can send today.
 
         # Get the player's vote based on the game state and previous votes
         if nominee == self.name:
-            nominee_context = "You are the nominee for execution. "
+            nominee_context = "You are the nominee for execution."
+            question = "Should you vote YES or NO on this nomination? Consider all relevant information."
         else:
-            nominee_context = f"The nominee for execution is {nominee}. "
+            nominee_context = f"The nominee for execution is {nominee}."
+            question = "Should you vote YES or NO on this nomination? Consider all relevant information."
 
         if required_to_tie:
-            required_votes_context = f"{required_to_nominate} votes are required to execute the nominee. {required_to_tie} votes are required to tie the previous nominee. "
+            required_votes_context = f"{required_to_nominate} votes are required to execute the nominee. {required_to_tie} votes are required to tie the previous nominee."
         else:
-            required_votes_context = f"{required_to_nominate} votes are required to execute the nominee. "
+            required_votes_context = f"{required_to_nominate} votes are required to execute the nominee."
 
-        # Format previous votes for context
+        # Format previous votes for context, including public reasoning only
         votes_context = "Previous votes in this nomination:\n"
-        for voter_name, vote in previous_votes:
-            votes_context += f"- {voter_name}: {vote.name}\n"
+        for voter_name, vote, _, public_reasoning in previous_votes:
+            votes_context += f"- {voter_name}: {vote.value} (Reasoning: {public_reasoning})\n"
         
         user_message = f"""
 You need to vote on the current nomination.
@@ -258,41 +285,46 @@ You need to vote on the current nomination.
 {required_votes_context}
 {votes_context}
 
-Should you vote YES or NO on this nomination? Consider all relevant information.
+{question}
 
-IMPORTANT: You must respond with ONLY the word 'YES' or 'NO' - nothing else. Do not include any explanation, reasoning, or other text.
+Use the vote tool to cast your vote and provide your reasoning. Your reasoning will be shared with all players who vote after you.
 """
         
         response = request_llm_response(
             user_message=user_message,
+            model=self.model,
             cached_system_prompt_strs=self._get_cached_system_prompt(public_game_state),
             non_cached_system_prompt_strs=[
                 self._get_dynamic_system_prompt(public_game_state),
                 self._get_history_prompt()
             ],
-            max_tokens=5  # Reduce max tokens to discourage long responses
+            tools=[VOTE_TOOL]
         )
         
-        # Ensure response is a string and convert to uppercase
-        if isinstance(response, str):
-            vote_response = response.strip().upper()
+        # Handle the response
+        if isinstance(response, dict) and "function_name" in response:
+            function_name = response["function_name"]
+            arguments = response.get("arguments", {})
             
-            # Check if the response contains YES (even if there's extra text)
-            if "YES" in vote_response:
-                if not self.alive:
-                    self.used_dead_vote = True
-                return Vote.YES
-            # Check if the response contains NO or if it doesn't contain YES
-            else:
-                return Vote.NO
-        else:
-            logger.error(f"{self.name} voted with an invalid response: {response}")
-            # Default to NO if there was an issue with the response
-            return Vote.NO
-    
+            if function_name == "vote":
+                vote_str = arguments.get("vote", "NO").upper()
+                private_reasoning = arguments.get("private_reasoning", "No private reasoning provided")
+                public_reasoning = arguments.get("public_reasoning", "No public reasoning provided")
+                
+                if vote_str == "YES":
+                    if not self.alive:
+                        self.used_dead_vote = True
+                    return Vote.YES, private_reasoning, public_reasoning
+                elif vote_str == "NO":
+                    return Vote.NO, private_reasoning, public_reasoning
+                else:
+                    logger.error(f"{self.name} voted with invalid vote: {vote_str}")
+                    return Vote.NO, f"Invalid vote response: {vote_str}", f"Invalid vote response: {vote_str}"
+        
+        logger.error(f"{self.name} failed to use voting tool properly: {response}")
+        return Vote.NO, "Failed to vote properly", "Failed to vote properly"
 
-    
-    def day_action(self, public_game_state: PublicGameState, nominations_open: bool = False) -> Optional[DayAction]:
+    def day_action(self, public_game_state: PublicGameState, nominations_open: bool = False, remaining_action_rounds: int = 0) -> Optional[DayAction]:
         available_tools: List[ToolParam] = []
 
         if nominations_open and not self.used_nomination and self.alive:
@@ -307,20 +339,27 @@ IMPORTANT: You must respond with ONLY the word 'YES' or 'NO' - nothing else. Do 
             if not used and action in action_to_tool:
                 available_tools.append(action_to_tool[action])
 
-        if self.messages_left > 0:
-            available_tools.append(MESSAGE_TOOL)
+        # Always allow messaging
+        available_tools.append(MESSAGE_TOOL)
 
-        # If no meaningful tools are available, just pass automatically
-        if not available_tools:
-            return NoAction(f"{self.name} has no actions available and passes")
 
         # Always add the pass tool as an option when other tools are available
-        # available_tools.append(PASS_TOOL)
+        available_tools.append(PASS_TOOL)
 
-        user_message = "It is your turn to either take an action or pass. Consider your character's abilities, what team you are on, what your teammates are doing and how you can help your team win. What do you want to do?"
+        # Add information about remaining action rounds
+        rounds_info = ""
+        if remaining_action_rounds > 0:
+            rounds_info = f" After this round, there will be {remaining_action_rounds} more chances to act before the day ends."
+        elif remaining_action_rounds == 1:
+            rounds_info = " This is the final round of day actions before the day ends."
+        elif remaining_action_rounds == 0:
+            rounds_info = " This is the final round of day actions before the day ends."
+
+        user_message = f"It is your turn to either take an action or pass.{rounds_info} Consider your character's abilities, what team you are on, what your teammates are doing and how you can help your team win. What do you want to do?"
         
         response = request_llm_response(
             user_message=user_message,
+            model=self.model,
             cached_system_prompt_strs=self._get_cached_system_prompt(public_game_state),
             non_cached_system_prompt_strs=[
                 self._get_dynamic_system_prompt(public_game_state),
@@ -337,7 +376,6 @@ IMPORTANT: You must respond with ONLY the word 'YES' or 'NO' - nothing else. Do 
             if function_name == "send_message":
                 recipients = arguments.get("recipients", [])
                 message_text = arguments.get("message", "")
-                self.messages_left -= 1
                 return MessageAction(recipients, message_text)
                 
             elif function_name == "nominate":
@@ -364,6 +402,7 @@ IMPORTANT: You must respond with ONLY the word 'YES' or 'NO' - nothing else. Do 
 
         response = request_llm_response(
             user_message=user_message,
+            model=self.model,
             cached_system_prompt_strs=self._get_cached_system_prompt(public_game_state),
             non_cached_system_prompt_strs=[
                 self._get_dynamic_system_prompt(public_game_state),

@@ -5,6 +5,9 @@ import argparse
 from dotenv import load_dotenv
 import http.client as http_client
 
+# Import character types
+from characters import Townsfolk, Minion, Demon, Outsider
+
 from scripts import Script, TROUBLE_BREWING
 from game import Game
 from game_enums import Alignment
@@ -63,37 +66,22 @@ def load_config(config_name="default"):
 def create_game(config, debug=False):
     """Create a simple 5-player Blood on the Clocktower game with hardcoded characters"""
     
-    # Import character types
-    from characters import Townsfolk, Minion, Demon
-    
-    # Define the 5 characters for our simple game
     characters = [
-        Demon.IMP,           # The evil demon who kills at night
-        Minion.SPY,     # Can poison players to disable their abilities
-        Townsfolk.SLAYER,     # Can win if 3 players remain with no execution
-        Townsfolk.FORTUNETELLER,    # Learns how many evil neighbors they have
-        Townsfolk.UNDERTAKER,    # Can attempt to slay the demon during the day
+        Demon.IMP,
+        Minion.SPY,
+        Townsfolk.SLAYER,
+        Townsfolk.FORTUNETELLER,
+        Townsfolk.UNDERTAKER,
+        Outsider.RECLUSE
     ]
-    
-    print("🎭 Starting a Simple 5-Player Blood on the Clocktower Game!")
-    print("=" * 60)
-    print("Characters in play:")
-    print("- 👹 Imp (Demon): Kills each night")
-    print("- 🧪 Poisoner (Minion): Poisons abilities")
-    print("- 🏛️  Mayor (Townsfolk): Wins with 3 players + no execution")
-    print("- 💝 Empath (Townsfolk): Senses evil neighbors")
-    print("- ⚔️  Slayer (Townsfolk): Can attempt to kill the demon")
-    print("=" * 60)
     
     # Create game with hardcoded characters
     game = Game(
         script=TROUBLE_BREWING,
         characters=characters,
-        random_seed=config.get("random_seed", 42)  # Use config seed or default to 42
+        random_seed=config.get("random_seed", 42),  # Use config seed or default to 42
+        model=config.get("model", "claude-3-5-haiku-20241022")  # Use config model or default
     )
-    
-    logger.info("Created simple 5-player game")
-    logger.info("Characters: Imp, Poisoner, Mayor, Empath, Slayer")
     
     return game
 

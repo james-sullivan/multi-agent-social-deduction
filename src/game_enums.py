@@ -10,5 +10,6 @@ class Alignment(Enum):
     EVIL = "Evil"
 
 class Phase(Enum):
+    SETUP = "Setup"
     NIGHT = "Night"
     DAY = "Day" 

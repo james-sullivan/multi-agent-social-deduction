@@ -3,7 +3,7 @@ from anthropic.types import ToolParam
 # Message tool for players to send messages to others
 MESSAGE_TOOL = ToolParam(
     name="send_message",
-    description="Send a message to one or more players. The message should be no more than 4 sentences. You have a limited number of messages you can send per day. Send a message to everyone if you want to talk publicly or send a message to only one or a few players if you want to talk privately.",
+    description="Send a message to one or more players. The message should be no more than 3 sentences. Send a message to everyone if you want to talk publicly or send a message to only one or a few players if you want to talk privately. Dead players are still in the game and can make decisions.",
     input_schema={
         "type": "object",
         "properties": {
@@ -20,6 +20,31 @@ MESSAGE_TOOL = ToolParam(
             }
         },
         "required": ["recipients", "message"]
+    }
+)
+
+# Vote tool for players to vote on nominations
+VOTE_TOOL = ToolParam(
+    name="vote",
+    description="Cast your vote on the current nomination. You must vote either YES or NO and provide both private and public reasoning for your vote. Only your public reasoning will be shared with other players.",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "vote": {
+                "type": "string",
+                "enum": ["YES", "NO"],
+                "description": "Your vote on the nomination. YES means you want to execute the nominee, NO means you don't want to execute them."
+            },
+            "private_reasoning": {
+                "type": "string",
+                "description": "Your private strategic reasoning for this vote. This will NOT be shared with other players and can include your true thoughts, team strategy, etc. Limit to one short sentence."
+            },
+            "public_reasoning": {
+                "type": "string",
+                "description": "Your public reasoning for this vote. This will be shared with all players who vote after you. Limit to one short sentence."
+            }
+        },
+        "required": ["vote", "private_reasoning", "public_reasoning"]
     }
 )
 
