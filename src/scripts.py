@@ -20,7 +20,7 @@ The following is the complete list of all characters that can be in the game.
 • Chef: Starts knowing how many adjacent pairs of Evil players there are. (If three evil players are adjacent in a line, there are two pairs)
 • Empath: Each night, learns how many of their 2 alive neighbors are Evil
 • Fortune Teller: Each night, chooses 2 players and learns if either is a Demon. There is a good player who registers as a Demon.
-• Undertaker: Each night (except the first), learns which character died by execution that day
+• Undertaker: Each night (except the first), learns which character died by execution that day (players killed by the Demon are not considered executed)
 • Monk: Each night (except the first), chooses a player to protect from the Demon's attack
 • Ravenkeeper: If dies at night, wakes to choose a player and learn their character
 • Virgin: The first time nominated, if the nominator is a Townsfolk, the nominator dies immediately and the nomination continues.

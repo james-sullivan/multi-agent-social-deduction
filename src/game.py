@@ -28,6 +28,7 @@ class PublicGameState:
     round_number: int
     chopping_block: ChoppingBlockInfo | None
     nominatable_players: list[str]
+    original_role_counts: dict[str, int]
 
 class Game:
     def __init__(self, 
@@ -47,7 +48,7 @@ class Game:
         townsfolk = script.townsfolk.copy()
         minions = script.minions.copy()
         demons = script.demons.copy()
-
+ 
         if random_seed:
             random.seed(random_seed)
 
@@ -81,8 +82,6 @@ class Game:
                 alignment = self._get_character_alignment(outsider_char)
                 player = Player(name=names.pop(), alignment=alignment, character=outsider_char, model=model)
                 self._players.append(player)
-                if player.character == Outsider.DRUNK:
-                    player.drunk_character = random.choice(townsfolk)
 
             for _ in range(townsfolk_count):
                 townsfolk_char = townsfolk.pop()
@@ -104,8 +103,31 @@ class Game:
         self._script: Script = script
         self._model: str = model
         
+        # Store original role counts (before Baron modifications)
+        if characters:
+            # Count actual roles when characters are provided
+            self._original_role_counts = {
+                "townsfolk": sum(1 for char in characters if isinstance(char, Townsfolk)),
+                "outsider": sum(1 for char in characters if isinstance(char, Outsider)),
+                "minion": sum(1 for char in characters if isinstance(char, Minion)),
+                "demon": sum(1 for char in characters if isinstance(char, Demon))
+            }
+        else:
+            # Use the provided counts (before Baron modifications)
+            self._original_role_counts = {
+                "townsfolk": townsfolk_count,
+                "outsider": outsider_count,
+                "minion": minion_count,
+                "demon": 1  # Always exactly 1 demon
+            }
+        
         # Initialize event tracker
         self.event_tracker = GameEventTracker()
+
+        if Outsider.DRUNK in self._character_dict:
+            self._reminder_tokens[Outsider.DRUNK] = {ReminderTokens.IS_THE_DRUNK: self._character_dict[Outsider.DRUNK]}
+            not_in_play_townsfolk = [char for char in self._script.townsfolk if char not in self._character_dict]
+            self._character_dict[Outsider.DRUNK].drunk_character = random.choice(not_in_play_townsfolk)
 
         # Fortuneteller setup
         if Townsfolk.FORTUNETELLER in self._character_dict:
@@ -149,7 +171,7 @@ class Game:
             round_number=self._round_number,
             phase=self._current_phase.value,
             participants=[p.name for p in self._players],
-            public_game_state=self._get_enhanced_game_state_for_logging(),
+            game_state=self._get_enhanced_game_state_for_logging(),
             metadata={
                 "player_count": len(self._players),
                 "players": [p.name for p in self._players],
@@ -225,7 +247,8 @@ class Game:
             current_phase=self._current_phase,
             round_number=self._round_number,
             chopping_block=chopping_block_info,
-            nominatable_players=nominatable_players
+            nominatable_players=nominatable_players,
+            original_role_counts=self._original_role_counts
         )
 
     def _get_enhanced_game_state_for_logging(self) -> dict[str, Any]:
@@ -241,6 +264,15 @@ class Game:
             
             enhanced_info = player_info.copy()
             enhanced_info["character"] = player_obj.character.value
+            
+            # Add drunk/poisoned status
+            is_drunk_or_poisoned = self._is_drunk_or_poisoned(player_obj)
+            enhanced_info["drunk"] = player_obj.character == Outsider.DRUNK
+            enhanced_info["poisoned"] = is_drunk_or_poisoned and player_obj.character != Outsider.DRUNK
+            
+            if player_obj.character == Outsider.DRUNK:
+                enhanced_info["drunk_character"] = player_obj.drunk_character.value if player_obj.drunk_character else None
+            
             enhanced_player_state.append(enhanced_info)
         
         return {
@@ -251,7 +283,8 @@ class Game:
                 "nominee": public_game_state.chopping_block.nominee,
                 "votes": public_game_state.chopping_block.votes
             } if public_game_state.chopping_block else None,
-            "nominatable_players": public_game_state.nominatable_players
+            "nominatable_players": public_game_state.nominatable_players,
+            "nominations_open": self._nominations_open
         }
 
     def _scarlet_woman_check(self, dead_player: Player) -> bool:
@@ -425,7 +458,7 @@ class Game:
             round_number=self._round_number,
             phase=self._current_phase.value,
             participants=[sender] + recipient_names,  # Keep for backward compatibility
-            public_game_state=self._get_enhanced_game_state_for_logging(),
+            game_state=self._get_enhanced_game_state_for_logging(),
             metadata=metadata,
             **kwargs
         )
@@ -540,8 +573,8 @@ class Game:
         self._broadcast_info("Storyteller", player, f"{evil_count} of your 2 alive neighbors are evil.", EventType.EMPATH_POWER,
                             metadata={"player_name": player.name, "evil_count": evil_count, "neighbors": [left.name, right.name]})
 
-    def _fortuneteller_power(self, player: Player) -> None:
-        player_choice = player.night_player_choice(self._get_public_game_state(), FORTUNETELLER_PROMPT)
+    def _fortuneteller_power(self, player: Player, night_start_game_state: PublicGameState) -> None:
+        player_choice = player.night_player_choice(night_start_game_state, FORTUNETELLER_PROMPT)
         
         try:
             if len(player_choice) != 2:
@@ -584,8 +617,8 @@ class Game:
         except ValueError as e:
             logger.error(f"Player {player.name} made invalid choice for Fortuneteller: {player_choice}. {str(e)}")
     
-    def _poisoner_power(self, player: Player) -> None:
-        player_choice = player.night_player_choice(self._get_public_game_state(), POISONER_PROMPT)
+    def _poisoner_power(self, player: Player, night_start_game_state: PublicGameState) -> None:
+        player_choice = player.night_player_choice(night_start_game_state, POISONER_PROMPT)
         
         try:
             if not player_choice or len(player_choice) != 1:
@@ -656,8 +689,8 @@ class Game:
         self._broadcast_info("Storyteller", player, f"THE GRIMOIRE:\n{full_grimoire}", EventType.SPY_POWER,
                             metadata={"player_name": player.name, "grimoire_info": grimoire_info})
 
-    def _monk_power(self, player: Player) -> None:
-        player_choice = player.night_player_choice(self._get_public_game_state(), MONK_PROMPT)
+    def _monk_power(self, player: Player, night_start_game_state: PublicGameState) -> None:
+        player_choice = player.night_player_choice(night_start_game_state, MONK_PROMPT)
         
         try:
             if len(player_choice) != 1:
@@ -672,8 +705,8 @@ class Game:
         except ValueError:
             logger.error(f"Player {player.name} tried to protect {player_choice}. len(player_choice) != 1")
 
-    def _imp_power(self, player: Player) -> None:
-        player_choice = player.night_player_choice(self._get_public_game_state(), IMP_PROMPT)
+    def _imp_power(self, player: Player, night_start_game_state: PublicGameState) -> None:
+        player_choice = player.night_player_choice(night_start_game_state, IMP_PROMPT)
         
         try:
             if not player_choice or len(player_choice) != 1:
@@ -707,14 +740,14 @@ class Game:
             logger.error(f"Error in imp power for {player.name}: {str(e)}")
             self._broadcast_info("Storyteller", player, "Something went wrong with your killing attempt.")
 
-    def _ravenkeeper_power(self, player: Player) -> None:
+    def _ravenkeeper_power(self, player: Player, night_start_game_state: PublicGameState) -> None:
         # Only allow Ravenkeeper to use power if they've died and been marked as woken
         if (Townsfolk.RAVENKEEPER not in self._reminder_tokens or 
             ReminderTokens.RAVENKEEPER_WOKEN not in self._reminder_tokens[Townsfolk.RAVENKEEPER] or
             self._reminder_tokens[Townsfolk.RAVENKEEPER][ReminderTokens.RAVENKEEPER_WOKEN] is not player):
             return
         
-        player_choice = player.night_player_choice(self._get_public_game_state(), RAVENKEEPER_PROMPT)
+        player_choice = player.night_player_choice(night_start_game_state, RAVENKEEPER_PROMPT)
         
         try:
             if len(player_choice) != 1:
@@ -749,9 +782,7 @@ class Game:
         # Check if there was an execution yesterday
         if (Townsfolk.UNDERTAKER not in self._reminder_tokens or 
             ReminderTokens.UNDERTAKER_EXECUTED not in self._reminder_tokens[Townsfolk.UNDERTAKER]):
-            info_msg = "No one was executed yesterday."
-            self._broadcast_info("Storyteller", player, info_msg, EventType.UNDERTAKER_POWER,
-                                metadata={"player_name": player.name, "result": "no_execution"})
+            # No execution yesterday - don't broadcast anything to the player
             return
         
         executed_player = self._reminder_tokens[Townsfolk.UNDERTAKER][ReminderTokens.UNDERTAKER_EXECUTED]
@@ -775,8 +806,8 @@ class Game:
         # Clear the reminder token after use
         del self._reminder_tokens[Townsfolk.UNDERTAKER][ReminderTokens.UNDERTAKER_EXECUTED]
 
-    def _butler_power(self, player: Player) -> None:
-        player_choice = player.night_player_choice(self._get_public_game_state(), BUTLER_PROMPT)
+    def _butler_power(self, player: Player, night_start_game_state: PublicGameState) -> None:
+        player_choice = player.night_player_choice(night_start_game_state, BUTLER_PROMPT)
         
         try:
             if len(player_choice) != 1:
@@ -869,6 +900,9 @@ class Game:
         self._current_phase = Phase.NIGHT
         self._broadcast_info("Storyteller", self._all_players(), f"Night has begun on round {self._round_number}.", EventType.STORYTELLER_INFO)
 
+        # Save the public game state at the start of the night for consistent night-time decisions
+        night_start_game_state = self._get_public_game_state()
+
         # Track who is alive at the start of the night (only needed after first night)
         if self._round_number > 1:
             alive_at_start = {player.name for player in self._players if player.alive}
@@ -904,14 +938,14 @@ class Game:
 
             not_in_play = [townsfolk_not_in_play[0], townsfolk_not_in_play[1], outsiders_not_in_play[0]]
 
-            self._broadcast_info("Storyteller", demon, f"Three good roles not in play are {', '.join([character for character in not_in_play])} and your minion(s) are {', '.join([player.name for player in minions])}", EventType.PLAYER_SETUP,
+            self._broadcast_info("Storyteller", demon, f"Three good roles not in play are {', '.join([character for character in not_in_play])} and your minion(s) are {', '.join([player.name for player in minions])}", EventType.DEMON_INFO,
                                 metadata={
                                     "character": demon.character.value,
                                     "not_in_play": not_in_play,
                                     "minions": [player.name for player in minions]
                                 })
 
-            self._broadcast_info("Storyteller", minions, f"The Demon is {demon.name}.", EventType.PLAYER_SETUP,
+            self._broadcast_info("Storyteller", minions, f"The Demon is {demon.name}.", EventType.MINION_INFO,
                                 metadata={"demon": demon.name, "demon_character": demon.character.value})
 
             # First night character actions and info
@@ -922,7 +956,7 @@ class Game:
                 
                 match character:
                     case Minion.POISONER:
-                        self._poisoner_power(player)
+                        self._poisoner_power(player, night_start_game_state)
                     case Minion.SPY:
                         self._spy_power(player)
                     case Townsfolk.WASHERWOMAN:
@@ -936,9 +970,9 @@ class Game:
                     case Townsfolk.EMPATH:
                         self._empath_power(player)
                     case Townsfolk.FORTUNETELLER:
-                        self._fortuneteller_power(player)
+                        self._fortuneteller_power(player, night_start_game_state)
                     case Outsider.BUTLER:
-                        self._butler_power(player)
+                        self._butler_power(player, night_start_game_state)
             
         # Other nights
         else:
@@ -949,23 +983,23 @@ class Game:
                 
                 match character:
                     case Minion.POISONER:
-                        self._poisoner_power(player)
+                        self._poisoner_power(player, night_start_game_state)
                     case Townsfolk.MONK:
-                        self._monk_power(player)
+                        self._monk_power(player, night_start_game_state)
                     case Minion.SPY:
                         self._spy_power(player)
                     case Demon.IMP:
-                        self._imp_power(player)
+                        self._imp_power(player, night_start_game_state)
                     case Townsfolk.RAVENKEEPER:
-                        self._ravenkeeper_power(player)
+                        self._ravenkeeper_power(player, night_start_game_state)
                     case Townsfolk.UNDERTAKER:
                         self._undertaker_power(player)
                     case Townsfolk.EMPATH:
                         self._empath_power(player)
                     case Townsfolk.FORTUNETELLER:
-                        self._fortuneteller_power(player)
+                        self._fortuneteller_power(player, night_start_game_state)
                     case Outsider.BUTLER:
-                        self._butler_power(player)
+                        self._butler_power(player, night_start_game_state)
 
             # Announce deaths at the end of the night
             alive_at_end = {player.name for player in self._players if player.alive}
@@ -974,12 +1008,27 @@ class Game:
             if died_during_night:
                 if len(died_during_night) == 1:
                     dead_player_name = list(died_during_night)[0]
-                    self._broadcast_info("Storyteller", self._all_players(), f"This morning, {dead_player_name} was found dead.", EventType.STORYTELLER_INFO)
+                    self._broadcast_info("Storyteller", self._all_players(), f"This morning, {dead_player_name} was found dead.", 
+                                        EventType.DEATH_ANNOUNCEMENT,
+                                        metadata={
+                                            "dead_players": [dead_player_name],
+                                            "recipients": [p.name for p in self._all_players()]
+                                        })
                 else:
                     dead_players = ", ".join(sorted(died_during_night))
-                    self._broadcast_info("Storyteller", self._all_players(), f"This morning, {dead_players} were found dead.", EventType.STORYTELLER_INFO)
+                    self._broadcast_info("Storyteller", self._all_players(), f"This morning, {dead_players} were found dead.", 
+                                        EventType.DEATH_ANNOUNCEMENT,
+                                        metadata={
+                                            "dead_players": sorted(list(died_during_night)),
+                                            "recipients": [p.name for p in self._all_players()]
+                                        })
             else:
-                self._broadcast_info("Storyteller", self._all_players(), "This morning, everyone is still alive.", EventType.STORYTELLER_INFO)
+                self._broadcast_info("Storyteller", self._all_players(), "This morning, everyone is still alive.", 
+                                    EventType.DEATH_ANNOUNCEMENT,
+                                    metadata={
+                                        "dead_players": [],
+                                        "recipients": [p.name for p in self._all_players()]
+                                    })
 
     
     def _slayer_power(self, player: Player, action: SlayerPowerAction) -> bool:
@@ -1119,7 +1168,7 @@ class Game:
             round_number=self._round_number,
             phase=self._current_phase.value,
             participants=[nominee.name],
-            public_game_state=self._get_enhanced_game_state_for_logging(),
+            game_state=self._get_enhanced_game_state_for_logging(),
             metadata={
                 "nominee": nominee.name,
                 "votes": count, 
@@ -1173,7 +1222,7 @@ class Game:
         for i in range(loops):
             if i == 1:  # Open nominations on the second iteration
                 self._nominations_open = True
-                self._broadcast_info("Storyteller", self._all_players(), "Nominations are now open.", EventType.STORYTELLER_INFO)
+                self._broadcast_info("Storyteller", self._all_players(), "Nominations are now open.", EventType.NOMINATIONS_OPEN)
         
             # Check if we should end the day early due to no productive nominations left
             if self._no_productive_nominations_left():
@@ -1219,7 +1268,7 @@ class Game:
                         round_number=self._round_number,
                         phase=self._current_phase.value,
                         participants=[player.name],
-                        public_game_state=self._get_enhanced_game_state_for_logging(),
+                        game_state=self._get_enhanced_game_state_for_logging(),
                         metadata={"player_name": player.name, "reason": action.reason}
                     )
                 
@@ -1236,7 +1285,7 @@ class Game:
                 round_number=self._round_number,
                 phase=self._current_phase.value,
                 participants=[executed_player.name],
-                public_game_state=self._get_enhanced_game_state_for_logging(),
+                game_state=self._get_enhanced_game_state_for_logging(),
                 metadata={"executed_player": executed_player.name}
             )
             
@@ -1269,14 +1318,13 @@ class Game:
     
     def run_game(self, max_rounds=6) -> Alignment | None:
         # Track game start
-        players_info = [f"{p.name} ({p.character.value})" for p in self._players]
         self.event_tracker.add_event(
             event_type=EventType.GAME_START,
             description=f"Blood on the Clocktower game started with {len(self._players)} players",
             round_number=self._round_number,
             phase=self._current_phase.value,
             participants=[p.name for p in self._players],
-            public_game_state=self._get_enhanced_game_state_for_logging(),
+            game_state=self._get_enhanced_game_state_for_logging(),
             metadata={
                 "max_rounds": max_rounds, 
                 "players": [p.name for p in self._players],
@@ -1295,19 +1343,11 @@ class Game:
                     description=f"Setup phase complete, transitioning to Night phase",
                     round_number=self._round_number,
                     phase="NIGHT",
-                    public_game_state=self._get_enhanced_game_state_for_logging()
+                    game_state=self._get_enhanced_game_state_for_logging()
                 )
                 self._current_phase = Phase.NIGHT
             
             while self._round_number <= max_rounds:
-                self.event_tracker.add_event(
-                    event_type=EventType.ROUND_START,
-                    description=f"Round {self._round_number} begins",
-                    round_number=self._round_number,
-                    phase=self._current_phase.value,
-                    public_game_state=self._get_enhanced_game_state_for_logging()
-                )
-                
                 # Only add night phase change event if we're not already in night phase
                 if self._current_phase != Phase.NIGHT:
                     self.event_tracker.add_event(
@@ -1315,7 +1355,7 @@ class Game:
                         description=f"Night phase begins",
                         round_number=self._round_number,
                         phase="NIGHT",
-                        public_game_state=self._get_enhanced_game_state_for_logging()
+                        game_state=self._get_enhanced_game_state_for_logging()
                     )
                 
                 self._run_night_phase()
@@ -1330,7 +1370,7 @@ class Game:
                     description=f"Day phase begins",
                     round_number=self._round_number,
                     phase="DAY",
-                    public_game_state=self._get_enhanced_game_state_for_logging()
+                    game_state=self._get_enhanced_game_state_for_logging()
                 )
                 
                 game_over = self._run_day_phase()
@@ -1344,7 +1384,22 @@ class Game:
                     return game_over
                 
                 for player in self._players:
-                    player.summarize_history(self._get_public_game_state(), self.event_tracker)
+                    player.summarize_history(self._get_public_game_state())
+                    
+                    # Track the notes update event
+                    self.event_tracker.add_event(
+                        event_type=EventType.NOTES_UPDATE,
+                        description=f"{player.name} updated their notes",
+                        round_number=self._round_number,
+                        phase=self._current_phase.value,
+                        participants=[player.name],
+                        game_state=self._get_enhanced_game_state_for_logging(),
+                        metadata={
+                            "player_name": player.name, 
+                            "character": player.character.value, 
+                            "notes": player.notes
+                        }
+                    )
 
                 self._round_number += 1
             
@@ -1375,7 +1430,7 @@ class Game:
             description=description,
             round_number=self._round_number,
             phase=self._current_phase.value,
-            public_game_state=self._get_enhanced_game_state_for_logging(),
+            game_state=self._get_enhanced_game_state_for_logging(),
             metadata={
                 "winner": winner.value if winner else None,
                 "api_cost_summary": cost_summary,

@@ -15,6 +15,8 @@ class ReminderTokens(Enum):
     IMP_KILLED = "Imp_Killed"
     UNDERTAKER_EXECUTED = "Undertaker_Executed"
     BUTLER_MASTER = "Butler_Master"
+    IS_THE_DRUNK = "Is_the_Drunk"
+    
 class Character(Enum):
     """Base enum for all characters - empty by design"""
     pass

@@ -109,24 +109,29 @@ class Player:
         rules_and_chars = f"""<rules>
 {BOTC_RULES}
 </rules>
-
 <characters>
 {public_game_state.character_str}
-</characters>"""
+</characters>
+<role_counts>
+This game was set up with {public_game_state.original_role_counts['townsfolk']} Townsfolk, {public_game_state.original_role_counts['outsider']} Outsider(s), {public_game_state.original_role_counts['minion']} Minion(s), and {public_game_state.original_role_counts['demon']} Demon (before any Baron modifications).
+</role_counts>"""
 
         seating_explanation = f"The seating order is important for several game mechanics such as voting order and character abilities. The seat adjacency wraps from the first to the last. For example, {public_game_state.player_state[0]['name']} is adjacent to {public_game_state.player_state[-1]['name']} and {public_game_state.player_state[1]['name']}."
 
-        player_info = f"""<seating_explanation>
-{seating_explanation}
-</seating_explanation>
+        player_info = f"""{seating_explanation}
 
-<player_identity>
 You are a player in Blood on the Clocktower.
 Your name is {self.name}.
 Your character is {self.character.value if self.drunk_character is None else self.drunk_character.value}. 
 You are on the {self.alignment.name} team.
 Remember to always act according to your character's abilities and your team's win condition. Analyze the current game state carefully before making decisions.
-</player_identity>"""
+
+IMPORTANT STRATEGIC PRINCIPLES:
+- Players will rarley have perfect information and they should not wait for perfect information to vote YES on a nomination.
+- Dead players remain valuable contributors to discussion and strategy.
+- Do not exclude dead players from messages just because they are dead.
+- Consider the game state: with fewer players alive, each decision becomes more critical.
+"""
 
         return [rules_and_chars, player_info]
 
@@ -175,7 +180,7 @@ You have {"not" if self.used_nomination else ""} nominated today.
 </history>"""
 
 
-    def summarize_history(self, public_game_state: PublicGameState, event_tracker=None) -> None:
+    def summarize_history(self, public_game_state: PublicGameState) -> None:
         """Summarize the player's history into their notes using AI."""
         if not self.history:
             self.notes = "No notes so far."
@@ -199,26 +204,7 @@ You have {"not" if self.used_nomination else ""} nominated today.
         else:
             self.notes = "No notes so far."
 
-        # Track the notes update event if tracker is provided
-        if event_tracker:
-            from game_events import EventType
-            
-            # Get game statistics from the event tracker
-            game_stats = event_tracker.get_game_statistics()
-            
-            event_tracker.add_event(
-                event_type=EventType.NOTES_UPDATE,
-                description=f"{self.name} updated their notes",
-                round_number=public_game_state.round_number,
-                phase=public_game_state.current_phase.value,
-                participants=[self.name],
-                metadata={
-                    "player_name": self.name, 
-                    "character": self.character.value, 
-                    "notes": self.notes,
-                    "game_statistics": game_stats
-                }
-            )
+
 
         self.history = []
 
@@ -255,17 +241,23 @@ You have {"not" if self.used_nomination else ""} nominated today.
 
         # Nominator context
         if nomination_action.nominator == self.name:
-            nominator_context = f"You are the nominator and your private reasoning is:\n{nomination_action.private_reasoning}"
+            nominator_context = f"You are the player who nominated {nominee} and you should STRONGLY consider voting YES since you initiated this nomination. Your private reasoning for nominating them is:\n{nomination_action.private_reasoning}\n\nRemember: If you don't vote YES on your own nomination, it sends a confusing signal to other players and makes the nomination much less likely to succeed."
         else:
-            nominator_context = f"The nominator is {nomination_action.nominator} and their reason is:\n{nomination_action.public_reasoning}"
+            nominator_context = f"The player who nominated {nominee} is {nomination_action.nominator} and their reason for nominating them is:\n{nomination_action.public_reasoning}"
 
         # Get the player's vote based on the game state and previous votes
         if nominee == self.name:
             nominee_context = "You are the nominee for execution."
-            question = "Should you vote YES or NO on this nomination? Consider all relevant information."
+            question = "Should you vote YES or NO on this nomination? As the nominee, you typically want to vote NO unless you have a strategic reason to vote YES (like proving your innocence through death)."
         else:
             nominee_context = f"The nominee for execution is {nominee}."
-            question = "Should you vote YES or NO on this nomination? Consider all relevant information."
+            # Add context about current game state
+            alive_count = sum(1 for p in public_game_state.player_state if p['alive'])
+            if alive_count <= 3:
+                urgency_context = "WARNING: With only a few players left alive, this decision is CRITICAL. The Evil team wins if only 2 players remain alive."
+            else:
+                urgency_context = "Consider whether this execution will help your team gather information or eliminate a threat."
+            question = f"Should you vote YES or NO on this nomination? {urgency_context} Consider all relevant information."
 
         if required_to_tie:
             required_votes_context = f"{required_to_nominate} votes are required to execute the nominee. {required_to_tie} votes are required to tie the previous nominee."
@@ -286,6 +278,14 @@ You need to vote on the current nomination.
 {votes_context}
 
 {question}
+
+STRATEGIC VOTING CONSIDERATIONS:
+- Executions provide valuable information even if the nominee isn't Evil
+- The Good team generally benefits from making executions happen to test claims and gather intel
+- Not executing anyone gives the Evil team a significant advantage
+- Dead players can still participate in discussions and provide value
+- Consider the risk/reward: is the potential information gain worth the risk?
+- If you're Good and unsure, leaning toward YES often helps your team more than being overly cautious
 
 Use the vote tool to cast your vote and provide your reasoning. Your reasoning will be shared with all players who vote after you.
 """

@@ -17,6 +17,7 @@ class EventType(Enum):
     PLAYER_DEATH = "player_death"
     CHARACTER_POWER = "character_power"  # Keep for backwards compatibility and generic use
     NOMINATION = "nomination"
+    NOMINATIONS_OPEN = "nominations_open"
     NOMINATION_RESULT = "nomination_result"
     VOTING = "voting"
     EXECUTION = "execution"
@@ -26,7 +27,10 @@ class EventType(Enum):
     NOTES_UPDATE = "notes_update"
     PLAYER_PASS = "player_pass"
     PLAYER_SETUP = "player_setup"
+    DEMON_INFO = "demon_info"
+    MINION_INFO = "minion_info"
     STORYTELLER_INFO = "storyteller_info"
+    DEATH_ANNOUNCEMENT = "death_announcement"
     
     # Specific character power events
     WASHERWOMAN_POWER = "washerwoman_power"
@@ -59,15 +63,15 @@ class GameEvent:
     description: str
     participants: Optional[List[str]] = None
     metadata: Optional[Dict[str, Any]] = None
-    public_game_state: Optional[Dict[str, Any]] = None
+    game_state: Optional[Dict[str, Any]] = None
     
     def __post_init__(self):
         if self.participants is None:
             self.participants = []
         if self.metadata is None:
             self.metadata = {}
-        if self.public_game_state is None:
-            self.public_game_state = {}
+        if self.game_state is None:
+            self.game_state = {}
 
 class GameEventTracker:
     """Tracks and manages all events during a Blood on the Clocktower game"""
@@ -103,7 +107,7 @@ class GameEventTracker:
                   phase: str,
                   participants: Optional[List[str]] = None,
                   metadata: Optional[Dict[str, Any]] = None,
-                  public_game_state: Optional[Dict[str, Any]] = None) -> None:
+                  game_state: Optional[Dict[str, Any]] = None) -> None:
         """Add a new event to the tracker and write it immediately to JSONL file"""
         event = GameEvent(
             timestamp=datetime.now().isoformat(),
@@ -113,7 +117,7 @@ class GameEventTracker:
             description=description,
             participants=participants or [],
             metadata=metadata or {},
-            public_game_state=public_game_state or {}
+            game_state=game_state or {}
         )
         self.events.append(event)
         self._print_event(event)
@@ -145,6 +149,7 @@ class GameEventTracker:
             EventType.PLAYER_DEATH: "\033[1;31m",    # Bold red
             EventType.CHARACTER_POWER: "\033[1;35m", # Bold magenta
             EventType.NOMINATION: "\033[1;33m",      # Bold yellow
+            EventType.NOMINATIONS_OPEN: "\033[1;93m", # Bright yellow
             EventType.NOMINATION_RESULT: "\033[1;93m", # Bright yellow
             EventType.VOTING: "\033[0;33m",          # Yellow
             EventType.EXECUTION: "\033[1;31m",       # Bold red
@@ -154,7 +159,10 @@ class GameEventTracker:
             EventType.NOTES_UPDATE: "\033[1;94m",    # Light blue
             EventType.PLAYER_PASS: "\033[0;90m",     # Dark gray
             EventType.PLAYER_SETUP: "\033[1;96m",    # Bright cyan
+            EventType.DEMON_INFO: "\033[1;91m",       # Bright red
+            EventType.MINION_INFO: "\033[1;95m",      # Bright magenta
             EventType.STORYTELLER_INFO: "\033[1;97m", # Bright white
+            EventType.DEATH_ANNOUNCEMENT: "\033[1;91m", # Bright red
             
             # Specific character power colors (all use same color)
             EventType.WASHERWOMAN_POWER: "\033[1;35m",    # Bold magenta
@@ -192,6 +200,7 @@ class GameEventTracker:
             EventType.PLAYER_DEATH: "💀 DEATH",
             EventType.CHARACTER_POWER: "✨ POWER",
             EventType.NOMINATION: "⚖️ NOMINATION",
+            EventType.NOMINATIONS_OPEN: "📋 NOMINATIONS",
             EventType.NOMINATION_RESULT: "✅ VOTE RESULT",
             EventType.VOTING: "🗳️ VOTE",
             EventType.EXECUTION: "⚔️ EXECUTION",
@@ -201,7 +210,10 @@ class GameEventTracker:
             EventType.NOTES_UPDATE: "📝 NOTES",
             EventType.PLAYER_PASS: "⏭️  PASS",
             EventType.PLAYER_SETUP: "🔧 SETUP",
+            EventType.DEMON_INFO: "👹 DEMON INFO",
+            EventType.MINION_INFO: "🔥 MINION INFO",
             EventType.STORYTELLER_INFO: "🎭 STORYTELLER",
+            EventType.DEATH_ANNOUNCEMENT: "☠️  DEATHS",
             
             # Specific character power prefixes
             EventType.WASHERWOMAN_POWER: "🧺 WASHERWOMAN",
@@ -414,7 +426,7 @@ def load_events_from_jsonl(filepath: str) -> List[GameEvent]:
                         description=event_dict['description'],
                         participants=event_dict.get('participants', []),
                         metadata=event_dict.get('metadata', {}),
-                        public_game_state=event_dict.get('public_game_state', {})
+                        game_state=event_dict.get('game_state', {})
                     )
                     events.append(event)
                     

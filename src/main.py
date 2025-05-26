@@ -68,11 +68,11 @@ def create_game(config, debug=False):
     
     characters = [
         Demon.IMP,
-        Minion.SPY,
+        Minion.POISONER,
         Townsfolk.SLAYER,
         Townsfolk.FORTUNETELLER,
         Townsfolk.UNDERTAKER,
-        Outsider.RECLUSE
+        Outsider.DRUNK,
     ]
     
     # Create game with hardcoded characters

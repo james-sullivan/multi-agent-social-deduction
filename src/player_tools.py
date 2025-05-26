@@ -12,7 +12,7 @@ MESSAGE_TOOL = ToolParam(
                 "items": {
                     "type": "string"
                 },
-                "description": "List of player names to send the message to. For example, if you want to send a message to Susan and John, you would put ['Susan', 'John'] here."
+                "description": "List of player names to send the message to, including dead players. For example, if you want to send a message to Susan and John, you would put ['Susan', 'John'] here."
             },
             "message": {
                 "type": "string",
