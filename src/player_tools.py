@@ -106,7 +106,7 @@ def get_nomination_tool(nominatable_players: list[str]) -> ToolParam:
 
 PASS_TOOL = ToolParam(
     name="pass",
-    description="Choose not to take an action at this time. You may or may not have a chance to act again today.",
+    description="Choose not to take an action at this time. You may only pass once per day so be hesitant to use this tool.",
     input_schema={
         "type": "object",
         "properties": {

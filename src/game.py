@@ -505,16 +505,18 @@ class Game:
         )
 
     def _washerwoman_power(self, player: Player) -> None:
-        # Get the players from reminder tokens
-        townsfolk_player = self._reminder_tokens[Townsfolk.WASHERWOMAN][ReminderTokens.WASHERWOMAN_TOWNSFOLK]
-        other_player = self._reminder_tokens[Townsfolk.WASHERWOMAN][ReminderTokens.WASHERWOMAN_OTHER]
-        townsfolk_character = townsfolk_player.character
+        townsfolk_character: Character
+        
         if self._is_drunk_or_poisoned(player):
-            # Pick two random players and a random townsfolk character
-            available_players = [p for p in self._players if p is not townsfolk_player and p is not other_player]
-            random_players = random.sample(available_players, 2)
+            # Give false information - pick two random players and a random townsfolk character
+            random_players = random.sample(self._players, 2)
             townsfolk_character = random.choice(self._script.townsfolk)
             townsfolk_player, other_player = random_players[0], random_players[1]
+        else:
+            # Get the players from reminder tokens (these should exist for a real Washerwoman)
+            townsfolk_player = self._reminder_tokens[Townsfolk.WASHERWOMAN][ReminderTokens.WASHERWOMAN_TOWNSFOLK]
+            other_player = self._reminder_tokens[Townsfolk.WASHERWOMAN][ReminderTokens.WASHERWOMAN_OTHER]
+            townsfolk_character = townsfolk_player.character
             
         info_msg = f"One of these players is the {townsfolk_character.value}: {townsfolk_player.name}, {other_player.name}"
         self._broadcast_info("Storyteller", player, info_msg, EventType.WASHERWOMAN_POWER, 
@@ -525,24 +527,26 @@ class Game:
                             })
 
     def _librarian_power(self, player: Player) -> None:
-        # Check if there are any outsiders in the game
-        if ReminderTokens.LIBRARIAN_OUTSIDER not in self._reminder_tokens[Townsfolk.LIBRARIAN]:
-            # No outsiders in the game
-            info_msg = "There are no Outsiders in play."
-            self._broadcast_info("Storyteller", player, info_msg, EventType.LIBRARIAN_POWER,
-                                metadata={"player_name": player.name, "result": "no_outsiders"})
-            return
-            
-        # Get the players from reminder tokens
-        outsider_player = self._reminder_tokens[Townsfolk.LIBRARIAN][ReminderTokens.LIBRARIAN_OUTSIDER]
-        other_player = self._reminder_tokens[Townsfolk.LIBRARIAN][ReminderTokens.LIBRARIAN_OTHER]
-        outsider_character = outsider_player.character
+        outsider_character: Character
+        
         if self._is_drunk_or_poisoned(player):
-            # Pick two random players and a random outsider character
-            available_players = [p for p in self._players if p is not outsider_player and p is not other_player]
-            random_players = random.sample(available_players, 2)
+            # Give false information - pick two random players and a random outsider character
+            random_players = random.sample(self._players, 2)
             outsider_character = random.choice(self._script.outsiders)
             outsider_player, other_player = random_players[0], random_players[1]
+        else:
+            # Check if there are any outsiders in the game
+            if ReminderTokens.LIBRARIAN_OUTSIDER not in self._reminder_tokens[Townsfolk.LIBRARIAN]:
+                # No outsiders in the game
+                info_msg = "There are no Outsiders in play."
+                self._broadcast_info("Storyteller", player, info_msg, EventType.LIBRARIAN_POWER,
+                                    metadata={"player_name": player.name, "result": "no_outsiders"})
+                return
+                
+            # Get the players from reminder tokens
+            outsider_player = self._reminder_tokens[Townsfolk.LIBRARIAN][ReminderTokens.LIBRARIAN_OUTSIDER]
+            other_player = self._reminder_tokens[Townsfolk.LIBRARIAN][ReminderTokens.LIBRARIAN_OTHER]
+            outsider_character = outsider_player.character
             
         info_msg = f"One of these players is the {outsider_character.value}: {outsider_player.name}, {other_player.name}"
         self._broadcast_info("Storyteller", player, info_msg, EventType.LIBRARIAN_POWER,
@@ -553,16 +557,18 @@ class Game:
                             })
 
     def _investigator_power(self, player: Player) -> None:
-        # Get the players from reminder tokens
-        minion_player = self._reminder_tokens[Townsfolk.INVESTIGATOR][ReminderTokens.INVESTIGATOR_MINION]
-        other_player = self._reminder_tokens[Townsfolk.INVESTIGATOR][ReminderTokens.INVESTIGATOR_OTHER]
-        minion_character = minion_player.character
+        minion_character: Character
+        
         if self._is_drunk_or_poisoned(player):
-            # Pick two random players and a random minion character
-            available_players = [p for p in self._players if p is not minion_player and p is not other_player]
-            random_players = random.sample(available_players, 2)
+            # Give false information - pick two random players and a random minion character
+            random_players = random.sample(self._players, 2)
             minion_character = random.choice(self._script.minions)
             minion_player, other_player = random_players[0], random_players[1]
+        else:
+            # Get the players from reminder tokens
+            minion_player = self._reminder_tokens[Townsfolk.INVESTIGATOR][ReminderTokens.INVESTIGATOR_MINION]
+            other_player = self._reminder_tokens[Townsfolk.INVESTIGATOR][ReminderTokens.INVESTIGATOR_OTHER]
+            minion_character = minion_player.character
             
         info_msg = f"One of these players is the {minion_character.value}: {minion_player.name}, {other_player.name}"
         self._broadcast_info("Storyteller", player, info_msg, EventType.INVESTIGATOR_POWER,
@@ -624,18 +630,21 @@ class Game:
             choice1: Player = self._player_dict[player_choice[0]]
             choice2: Player = self._player_dict[player_choice[1]]
             
-            # Get the red herring player
-            red_herring = self._reminder_tokens[Townsfolk.FORTUNETELLER][ReminderTokens.RED_HERRING]
-            
-            # Check if either chosen player is a Demon or the red herring
-            either_is_demon_or_red_herring = (
-                Demon in self._get_player_roles(choice1) or choice1 is red_herring or
-                Demon in self._get_player_roles(choice2) or choice2 is red_herring
-            )
-            
-            if self._is_drunk_or_poisoned(player):
+            # Check if this is a drunk player or if reminder tokens exist
+            if (self._is_drunk_or_poisoned(player) or 
+                Townsfolk.FORTUNETELLER not in self._reminder_tokens or 
+                ReminderTokens.RED_HERRING not in self._reminder_tokens[Townsfolk.FORTUNETELLER]):
                 # Give false information
-                either_is_demon_or_red_herring = not either_is_demon_or_red_herring
+                either_is_demon_or_red_herring = random.choice([True, False])
+            else:
+                # Get the red herring player
+                red_herring = self._reminder_tokens[Townsfolk.FORTUNETELLER][ReminderTokens.RED_HERRING]
+                
+                # Check if either chosen player is a Demon or the red herring
+                either_is_demon_or_red_herring = (
+                    Demon in self._get_player_roles(choice1) or choice1 is red_herring or
+                    Demon in self._get_player_roles(choice2) or choice2 is red_herring
+                )
             
             if either_is_demon_or_red_herring:
                 info_msg = f"Yes, one of {choice1.name} and {choice2.name} is the Demon. Your reasoning: {reasoning}"
@@ -1316,15 +1325,16 @@ class Game:
                         if game_over:
                             return game_over
                 elif isinstance(action, NoAction):
-                    # Track when players pass their turn (event only, no broadcast to players)
-                    self.event_tracker.add_event(
-                        event_type=EventType.PLAYER_PASS,
-                        description=f"{player.name} passed their turn, private reasoning: {action.private_reasoning}",
-                        round_number=self._round_number,
-                        phase=self._current_phase.value,
-                        participants=[player.name],
-                        game_state=self._get_enhanced_game_state_for_logging(),
-                        metadata={"player_name": player.name, "private_reasoning": action.private_reasoning}
+                    # Send private confirmation to the player who passed
+                    self._broadcast_info(
+                        "Storyteller", 
+                        player, 
+                        f"You passed your turn. Your reasoning: {action.private_reasoning}",
+                        EventType.PLAYER_PASS,
+                        metadata={
+                            "player_name": player.name,
+                            "private_reasoning": action.private_reasoning,
+                        }
                     )
                 
             # Check again after each player's action in case nominations became unproductive
