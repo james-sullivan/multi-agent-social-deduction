@@ -328,14 +328,32 @@ class Game:
             "reminder_tokens": reminder_tokens_data
         }
 
+    def _change_character(self, player: Player, new_character: Character) -> Character:
+        """
+        Change a player's character and update all related game state.
+        Returns the old character.
+        """
+        old_character = player.character
+        
+        # Remove player from old character mapping
+        if old_character in self._character_dict and self._character_dict[old_character] == player:
+            del self._character_dict[old_character]
+        
+        # Update player's character
+        player.character = new_character
+        
+        # Add player to new character mapping
+        self._character_dict[new_character] = player
+        
+        return old_character
+
     def _scarlet_woman_check(self, dead_player: Player) -> bool:
         scarlet_woman = [player for player in self._players if player.alive and player.character == Minion.SCARLET_WOMAN and not self._is_drunk_or_poisoned(player)]
         alive_count = sum(1 for player in self._players if player.alive)
         if isinstance(dead_player.character, Demon) and len(scarlet_woman) == 1 and alive_count >= 4:
             woman = scarlet_woman[0]
-            old_character = woman.character
-            woman.character = dead_player.character
-            self._broadcast_info("Storyteller", woman, f"The Demon has died and you have become the new Demon. Your chacter is now {woman.character.value}",
+            old_character = self._change_character(woman, dead_player.character)
+            self._broadcast_info("Storyteller", woman, f"The Demon has died and you have become the new Demon. Your character is now {woman.character.value}",
                                 event_type=EventType.SCARLET_WOMAN_TRANSFORM,
                                 metadata={
                                     "player_name": woman.name,
@@ -789,12 +807,18 @@ class Game:
                     # Pick a minion to become the new Imp
                     minions = [p for p in self._players if isinstance(p.character, Minion)]
                     if minions:
-                        choice = random.choice(minions)
-                        choice.character = Demon.IMP
-                        self._broadcast_info("Storyteller", choice, f"The Imp {player.name} chose to kill themself and you are now the new Imp.", EventType.IMP_TRANSFORM,
-                                    metadata={"player_name": player.name, "new_imp": choice.name, "private_reasoning": reasoning})
+                        new_imp = random.choice(minions)
+                        old_character = self._change_character(new_imp, Demon.IMP)
+                        self._broadcast_info("Storyteller", new_imp, f"The Imp {player.name} chose to kill themself and you are now the new Imp.", EventType.IMP_TRANSFORM,
+                                    metadata={
+                                        "player_name": player.name, 
+                                        "new_imp": new_imp.name, 
+                                        "old_character": old_character.value,
+                                        "new_character": new_imp.character.value,
+                                        "private_reasoning": reasoning
+                                    })
             else:
-                self._broadcast_info("Storyteller", player, f"You tried to kill {choice.name} but they did not die. Your reasoning: {reasoning}", EventType.IMP_POWER,
+                self._broadcast_info("Storyteller", player, f"You tried t o kill {choice.name} but they did not die. Your reasoning: {reasoning}", EventType.IMP_POWER,
                                     metadata={"player_name": player.name, "target": choice.name, "success": False, "reason": "protected", "private_reasoning": reasoning})
 
         except Exception as e:
@@ -993,14 +1017,14 @@ class Game:
             assert len(minions) >= 1, "There should be at least one minion"
 
             townsfolk_not_in_play = [character.value for character in self._script.townsfolk if character not in self._character_dict]
-            outsiders_not_in_play = [character.value for character in self._script.outsiders if character not in self._character_dict]
+            outsiders_not_in_play = [character.value for character in self._script.outsiders if character not in self._character_dict and character != Outsider.DRUNK]
 
             random.shuffle(townsfolk_not_in_play)
             random.shuffle(outsiders_not_in_play)
 
             not_in_play = [townsfolk_not_in_play[0], townsfolk_not_in_play[1], outsiders_not_in_play[0]]
 
-            self._broadcast_info("Storyteller", demon, f"Three good roles not in play are {', '.join([character for character in not_in_play])} and your minion(s) are {', '.join([player.name for player in minions])}", EventType.DEMON_INFO,
+            self._broadcast_info("Storyteller", demon, f"Three good roles not in play are {', '.join([character for character in not_in_play])}. The Evil team can use those roles to bluff since there will be no other players with those roles. Your minion(s) are {', '.join([player.name for player in minions])}", EventType.DEMON_INFO,
                                 metadata={
                                     "demon": demon.name,
                                     "demon_character": demon.character.value,
@@ -1283,13 +1307,15 @@ class Game:
 
         # Allow one round of messaging, then open nominations
         loops = 4
+        end_day_early = False
+        consecutive_passes = 0
         for i in range(loops):
             if i == 1:  # Open nominations on the second iteration
                 self._nominations_open = True
                 self._broadcast_info("Storyteller", self._all_players(), "Nominations are now open.", EventType.NOMINATIONS_OPEN)
         
-            # Check if we should end the day early due to no productive nominations left
-            if self._no_productive_nominations_left():
+            # Check if we should end the day early
+            if end_day_early:
                 break
         
             day_players: list[Player] = list(self._players)
@@ -1300,6 +1326,11 @@ class Game:
 
             for player in day_players:
                 action: DayAction | None = player.day_action(self._get_public_game_state(), self._nominations_open, remaining_rounds)
+
+                if isinstance(action, NoAction):
+                    consecutive_passes += 1
+                else:
+                    consecutive_passes = 0
 
                 if isinstance(action, MessageAction):
                     self._broadcast_info(
@@ -1336,10 +1367,9 @@ class Game:
                             "private_reasoning": action.private_reasoning,
                         }
                     )
-                
-            # Check again after each player's action in case nominations became unproductive
-            if self._no_productive_nominations_left():
-                break
+                if consecutive_passes >= len(self._players) and self._round_number > 1:
+                    end_day_early = True
+                    break
 
         # Execute player on chopping block at end of day
         if self._chopping_block is not None:
@@ -1358,8 +1388,15 @@ class Game:
             if Townsfolk.UNDERTAKER in self._character_dict and self._character_dict[Townsfolk.UNDERTAKER].alive:
                 self._reminder_tokens[Townsfolk.UNDERTAKER][ReminderTokens.UNDERTAKER_EXECUTED] = executed_player
             
-            self._kill_player(executed_player)
             self._chopping_block = None
+            self._kill_player(executed_player)
+
+            if executed_player.character == Outsider.SAINT:
+                self._broadcast_info("Storyteller", self._all_players(), f"{executed_player.name} was a Saint and has been executed. Evil has won.",
+                                    EventType.SAINT_EXECUTED,
+                                    metadata={"executed_player": executed_player.name})
+                return Alignment.EVIL
+            
         else:
             # No execution occurred - check Mayor's win condition
             if self._check_mayor_win_condition():

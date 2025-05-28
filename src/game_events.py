@@ -53,6 +53,7 @@ class EventType(Enum):
     SCARLET_WOMAN_TRANSFORM = "scarlet_woman_transform"
     IMP_TRANSFORM = "imp_transform"
     MAYOR_WIN = "mayor_win"
+    SAINT_EXECUTED = "saint_executed"
 
 @dataclass
 class GameEvent:

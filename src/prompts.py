@@ -28,12 +28,12 @@ The number of votes needed for a successful nomination is at least half of the l
 The alignment of a player is the team they are on. A player can be on the Good team or the Evil team. By default, Townsfolk and Outsiders are Good players. Minions and the Demon are Evil players.
 
 ## Characters
-Each player has a character. Each character has an ability. A player's character is seperate from their alignment. The moment a player dies, or becomes poisoned or drunk, their character's ability stops affecting the game.
+Each player has a character. Each character has an ability. A player's character is seperate from their alignment. The moment a player dies, or becomes poisoned or drunk, their character's ability stops affecting the game. No one's character will be confirmed or denied by the Storyteller. For example, if a player uses the Slayer power you will be either told the target dies or nothing happened. If nothing happens the player who used the power may or may not be the real Slayer.
 
 ## Roles
 The Good team is made up of Townsfolk and Outsiders. Townsfolk are Good players who have an ability that is helpful to the Good team. Outsiders are Good players who have an ability that is harmful to the Good team.
 
-The Evil team is made up of one Demon and one to three Minions. The Demon is the most important Evil player and the player that the Good team is trying to kill. Minions are also Evil players who have an ability that is helpful to the Evil team. At the start of the game, the Demon is secretly told three good players that are not in play.
+The Evil team is made up of one Demon and one to three Minions. The Demon is the most important Evil player and the player that the Good team is trying to kill. Minions are also Evil players who have an ability that is helpful to the Evil team. At the start of the game, the Demon is secretly told three good players that are not in play so the evil team can bluff as those roles.
 
 ## Dead Players
 Dead players are still in the game and can still talk to other players, but they no longer have their character's ability, they cannot nominate players for execution, and they only get one vote for the rest of the game.

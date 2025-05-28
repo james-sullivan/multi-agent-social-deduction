@@ -63,7 +63,8 @@ def load_config(config_name="default"):
         "random_seed": 42  # Fixed seed for consistent games
     }
 
-def create_game(config, debug=False):    
+def create_game(config, debug=False):
+    '''
     characters = [
         Demon.IMP,
         Minion.POISONER,
@@ -76,15 +77,28 @@ def create_game(config, debug=False):
         Townsfolk.UNDERTAKER,
         Outsider.DRUNK
     ]
-    
+    '''
+
+    characters = [
+        Demon.IMP,
+        Minion.SCARLET_WOMAN,
+        Outsider.SAINT,
+        Townsfolk.SLAYER,
+        Townsfolk.EMPATH,
+        Townsfolk.FORTUNETELLER,
+        Townsfolk.MAYOR,
+        Townsfolk.VIRGIN
+    ]
+
     # Create game with hardcoded characters
     game = Game(
         script=TROUBLE_BREWING,
         characters=characters,
-        random_seed=config.get("random_seed", 42),  # Use config seed or default to 42
-        model=config.get("model", "claude-3-5-haiku-20241022")  # Use config model or default
+        random_seed= 43,  # Use config seed or default to 42
+        #model=config.get("model", "claude-3-5-haiku-20241022"),
+        model="claude-sonnet-4-20250514",
+        #model=config.get("model", "claude-opus-4-20250514"),
     )
-    
     return game
 
 def run_game(config_name="default", debug=False):

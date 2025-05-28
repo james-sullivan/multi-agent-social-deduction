@@ -139,6 +139,7 @@ IMPORTANT:
 - Do not exclude dead players from messages just because they are dead
 - Information you receive is potentially false because of drunkenness, poisioning, and players lying
 - You will never have perfect information, do not wait for perfect information to take action or to vote YES on a nomination
+- The day will be played in cycles where each player gets one chance to act per cycle. The order that players act in is randomized at the start of each cycle. 
 """
 
         return [rules_and_chars, player_info]
@@ -195,7 +196,7 @@ You have {"not" if self.used_nomination else ""} nominated today.
             return
         
         # Use prefix caching for better performance (no redundancy)
-        user_message = "It's time to update your notes. This first half of your notes should be a summary of your history. After this update your history will be cleared so make sure that all of the important information is included in your notes. The second half of your notes should be three bullet points of actionable strategy advice that you want to follow to help your team win. If there are already three bullet points, update them based on the new information. Only give me your updated notes, no other text and use bullet points. You only need to note information that is not in the rest of your system prompt. Do not make this longer than 20 lines."
+        user_message = "It's time to update your notes. This first half of your notes should be a summary of your history. After this update your history will be cleared so make sure that all of the important information is included in your notes. The second half of your notes should be five bullet points of actionable strategy advice that you want to follow to help your team win. If there are already five bullet points, update them based on the new information. Only give me your updated notes, no other text and use bullet points. You only need to note information that is not in the rest of your system prompt. Do not make this longer than 20 lines."
         
         response = request_llm_response(
             user_message=user_message,
