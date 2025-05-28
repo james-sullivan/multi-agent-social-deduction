@@ -45,9 +45,9 @@ Poisoned and Drunk are status effects that can be applied to players. They funct
 The rules and characters abilities sometimes talk about a player "registering" as good/evil, a particular role, or a particular character. This means that the game mechanics will treat them as the character, alignment, or role they are registering as, even if they are not that character, alignment, or role. For example, if a player "might" register as evil, then the Storyteller can decide to show another player a demon character when another player uses their ability to check what character they are.
 '''
 
-POISONER_PROMPT = '''Choose the name of one player to poison for the night and next day.'''
+POISONER_PROMPT = '''Choose the name of one player to poison for the night and next day. Posioned player's abilites will not work and they may receive false information.'''
 
-FORTUNETELLER_PROMPT = '''Choose 2 players to learn if either is the Demon.'''
+FORTUNETELLER_PROMPT = '''Choose any 2 players and learn if either is the Demon.'''
 
 MONK_PROMPT = '''Choose a player to protect from the Demon's attack tonight.'''
 
@@ -55,4 +55,4 @@ RAVENKEEPER_PROMPT = '''Choose a player to learn their character.'''
 
 BUTLER_PROMPT = '''Choose a player to be your master. Tomorrow during voting, you may only vote if your master votes first. You cannot choose yourself.'''
 
-IMP_PROMPT = '''Choose a player to kill tonight.'''
+IMP_PROMPT = '''Choose a player to kill tonight. If you choose yourself, one of your living minions will become the new Imp.'''

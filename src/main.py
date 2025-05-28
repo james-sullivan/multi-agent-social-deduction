@@ -63,16 +63,14 @@ def load_config(config_name="default"):
         "random_seed": 42  # Fixed seed for consistent games
     }
 
-def create_game(config, debug=False):
-    """Create a simple 5-player Blood on the Clocktower game with hardcoded characters"""
-    
+def create_game(config, debug=False):    
     characters = [
         Demon.IMP,
         Minion.POISONER,
-        Townsfolk.WASHERWOMAN,
         Townsfolk.INVESTIGATOR,
-        Townsfolk.LIBRARIAN,
-        Outsider.DRUNK,
+        Townsfolk.SLAYER,
+        Townsfolk.FORTUNETELLER,
+        Outsider.DRUNK
     ]
     
     # Create game with hardcoded characters
@@ -99,7 +97,7 @@ def run_game(config_name="default", debug=False):
     game = create_game(config, debug=debug)
     
     # Run the game
-    max_rounds = config.get("max_rounds", 6)
+    max_rounds = config.get("max_rounds", 8)
     result = game.run_game(max_rounds)
     
     if result == Alignment.GOOD:

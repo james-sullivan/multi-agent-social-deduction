@@ -8,7 +8,7 @@ if TYPE_CHECKING:
     from game import PublicGameState
 import json
 from anthropic.types import ToolParam
-from player_tools import MESSAGE_TOOL, SLAYER_TOOL, NOMINATION_TOOL, PASS_TOOL, VOTE_TOOL, get_nomination_tool
+from player_tools import get_message_tool, get_slayer_tool, PASS_TOOL, VOTE_TOOL, get_nomination_tool, get_night_choice_tool
 from enum import Enum
 from prompts import BOTC_RULES
 from scripts import TROUBLE_BREWING_CHARACTERS
@@ -59,10 +59,14 @@ class NominationAction(DayAction):
 @dataclass
 class SlayerPowerAction(DayAction):
     target: str
+    private_reasoning: str
+    public_reasoning: str
     
-    def __init__(self, target: str, reason: str = ""):
-        super().__init__(DayActions.SLAYER_POWER, reason)
+    def __init__(self, target: str, private_reasoning: str, public_reasoning: str):
+        super().__init__(DayActions.SLAYER_POWER, private_reasoning)  # Use private reasoning as internal reason
         self.target = target
+        self.private_reasoning = private_reasoning
+        self.public_reasoning = public_reasoning
 
 @dataclass
 class VoteAction(DayAction):
@@ -78,8 +82,11 @@ class VoteAction(DayAction):
 
 @dataclass
 class NoAction(DayAction):
-    def __init__(self, reason: str = "No action taken"):
-        super().__init__(DayActions.NO_ACTION, reason)
+    private_reasoning: str
+    
+    def __init__(self, private_reasoning: str = "No action taken"):
+        super().__init__(DayActions.NO_ACTION, private_reasoning)
+        self.private_reasoning = private_reasoning
 
 
 class Player:
@@ -122,15 +129,16 @@ This game was set up with {public_game_state.original_role_counts['townsfolk']} 
 
 You are a player in Blood on the Clocktower.
 Your name is {self.name}.
-Your character is {self.character.value if self.drunk_character is None else self.drunk_character.value}. 
+Your character is {self.character.value if self.drunk_character is None else self.drunk_character.value}.
+Your primary identity is a player. Your character only tells you what ability you have and it does not define how you need to act.
 You are on the {self.alignment.name} team.
-Remember to always act according to your character's abilities and your team's win condition. Analyze the current game state carefully before making decisions.
+Remember to always act with your team's win condition in mind. Analyze the current game state carefully before making decisions.
 
-IMPORTANT STRATEGIC PRINCIPLES:
-- Players will rarley have perfect information and they should not wait for perfect information to vote YES on a nomination.
-- Dead players remain valuable contributors to discussion and strategy.
-- Do not exclude dead players from messages just because they are dead.
-- Consider the game state: with fewer players alive, each decision becomes more critical.
+IMPORTANT:
+- Dead players can still receive and send messages
+- Do not exclude dead players from messages just because they are dead
+- Information you receive is potentially false because of drunkenness, poisioning, and players lying
+- You will never have perfect information, do not wait for perfect information to take action or to vote YES on a nomination
 """
 
         return [rules_and_chars, player_info]
@@ -180,14 +188,14 @@ You have {"not" if self.used_nomination else ""} nominated today.
 </history>"""
 
 
-    def summarize_history(self, public_game_state: PublicGameState) -> None:
+    def summarize_history(self, public_game_state: PublicGameState, clear_history: bool = True) -> None:
         """Summarize the player's history into their notes using AI."""
         if not self.history:
             self.notes = "No notes so far."
             return
         
         # Use prefix caching for better performance (no redundancy)
-        user_message = "It's time to update your notes using your history of events. You can find your notes in between <notes></notes> tags and history in between <history></history> tags. After this update your history will be cleared so make sure that all of the important information is included in your notes. Only give me your updated notes, no other text and use bullet points. You only need to note information that is not in the rest of your system prompt."
+        user_message = "It's time to update your notes. This first half of your notes should be a summary of your history. After this update your history will be cleared so make sure that all of the important information is included in your notes. The second half of your notes should be three bullet points of actionable strategy advice that you want to follow to help your team win. If there are already three bullet points, update them based on the new information. Only give me your updated notes, no other text and use bullet points. You only need to note information that is not in the rest of your system prompt. Do not make this longer than 20 lines."
         
         response = request_llm_response(
             user_message=user_message,
@@ -202,11 +210,11 @@ You have {"not" if self.used_nomination else ""} nominated today.
         if isinstance(response, str):
             self.notes = response
         else:
+            logger.error(f"{self.name} failed to summarize history: {response}")
             self.notes = "No notes so far."
 
-
-
-        self.history = []
+        if clear_history:
+            self.history = []
 
     def vote(self,
              nominee: str,
@@ -279,15 +287,9 @@ You need to vote on the current nomination.
 
 {question}
 
-STRATEGIC VOTING CONSIDERATIONS:
-- Executions provide valuable information even if the nominee isn't Evil
-- The Good team generally benefits from making executions happen to test claims and gather intel
-- Not executing anyone gives the Evil team a significant advantage
-- Dead players can still participate in discussions and provide value
-- Consider the risk/reward: is the potential information gain worth the risk?
-- If you're Good and unsure, leaning toward YES often helps your team more than being overly cautious
-
 Use the vote tool to cast your vote and provide your reasoning. Your reasoning will be shared with all players who vote after you.
+
+IMPORTANT: You do not need perfect information to vote YES on a nomination. Both good and evil players need to vote YES to kill the other team and get closer to winning. Voting YES to kill the other team is an important part of the game.
 """
         
         response = request_llm_response(
@@ -331,7 +333,7 @@ Use the vote tool to cast your vote and provide your reasoning. Your reasoning w
             available_tools.append(get_nomination_tool(public_game_state.nominatable_players))
 
         action_to_tool = { 
-            DayActions.SLAYER_POWER: SLAYER_TOOL,
+            DayActions.SLAYER_POWER: get_slayer_tool([player['name'] for player in public_game_state.player_state]),
         }
         
         # Add any once-per-game tools that haven't been used yet
@@ -340,7 +342,7 @@ Use the vote tool to cast your vote and provide your reasoning. Your reasoning w
                 available_tools.append(action_to_tool[action])
 
         # Always allow messaging
-        available_tools.append(MESSAGE_TOOL)
+        available_tools.append(get_message_tool([player['name'] for player in public_game_state.player_state]))
 
 
         # Always add the pass tool as an option when other tools are available
@@ -350,12 +352,10 @@ Use the vote tool to cast your vote and provide your reasoning. Your reasoning w
         rounds_info = ""
         if remaining_action_rounds > 0:
             rounds_info = f" After this round, there will be {remaining_action_rounds} more chances to act before the day ends."
-        elif remaining_action_rounds == 1:
-            rounds_info = " This is the final round of day actions before the day ends."
         elif remaining_action_rounds == 0:
             rounds_info = " This is the final round of day actions before the day ends."
 
-        user_message = f"It is your turn to either take an action or pass.{rounds_info} Consider your character's abilities, what team you are on, what your teammates are doing and how you can help your team win. What do you want to do?"
+        user_message = f"It is your turn to either take an action or pass.{rounds_info} Consider things like your notes, what team you are on, and what has happened so far. Be a little hesistant to nominate someone. What do you want to do?"
         
         response = request_llm_response(
             user_message=user_message,
@@ -386,19 +386,22 @@ Use the vote tool to cast your vote and provide your reasoning. Your reasoning w
                 
             elif function_name == "slayer_power":
                 target = arguments.get("target", "")
+                private_reasoning = arguments.get("private_reasoning", "No private reasoning provided")
+                public_reasoning = arguments.get("public_reasoning", "No public reasoning provided")
                 self.used_once_per_game[DayActions.SLAYER_POWER] = True
-                return SlayerPowerAction(target)
+                return SlayerPowerAction(target, private_reasoning, public_reasoning)
                 
             elif function_name == "pass":
-                return NoAction(f"{self.name} passed on their turn")
+                private_reasoning = arguments.get("private_reasoning", "No private reasoning provided")
+                return NoAction(private_reasoning)
         else:
             logger.error(f"{self.name} chose an invalid action: {response}")
                 
         # Default if no action was taken or there was an error
-        return NoAction(f"{self.name} did not choose a valid action")
-    
-    def night_player_choice(self, public_game_state: PublicGameState, prompt: str) -> list[str]:
-        user_message = f"{prompt}\nProvide an explaination of your choice between <thinking> tags, then your choice or choices between <names> tags and seperated by commas. e.g. <names>Bruce, Jacob</names>"
+        return NoAction("Did not choose a valid action")
+     
+    def night_player_choice(self, public_game_state: PublicGameState, prompt: str) -> tuple[list[str], str]:        
+        user_message = "Use the night_choice tool to make your selection and provide your reasoning."
 
         response = request_llm_response(
             user_message=user_message,
@@ -408,21 +411,29 @@ Use the vote tool to cast your vote and provide your reasoning. Your reasoning w
                 self._get_dynamic_system_prompt(public_game_state),
                 self._get_history_prompt()
             ],
-            tools=[]
+            tools=[get_night_choice_tool(prompt, [player['name'] for player in public_game_state.player_state])]
         )
 
-        # Extract player names using regex
-        player_names = []
-        if isinstance(response, str):
-            name_match = re.search(r'<names>(.*?)</names>', response, re.DOTALL)
-            if name_match:
-                names_str = name_match.group(1)
-                player_names = [name.strip() for name in names_str.split(',')]
+        # Handle the response
+        if isinstance(response, dict) and "function_name" in response:
+            function_name = response["function_name"]
+            arguments = response.get("arguments", {})
+            
+            if function_name == "night_choice":
+                player_choice = arguments.get("player_choice", [])
+                private_reasoning = arguments.get("private_reasoning", "")
+                
+                if player_choice and isinstance(player_choice, list) and len(player_choice) > 0:
+                    # Log the private reasoning for debugging/analysis
+                    logger.info(f"{self.name} night choice reasoning: {private_reasoning}")
+                    return player_choice, private_reasoning
+                else:
+                    logger.error(f"{self.name} provided empty or invalid player choice: {player_choice}")
+            else:
+                logger.error(f"{self.name} used wrong tool: {function_name}")
         else:
-            logger.error(f"{self.name} chose an invalid player: {response}")
+            logger.error(f"{self.name} failed to use night choice tool: {response}")
 
-        if not player_names:
-            logger.error(f"{self.name} chose an invalid player: {response}")
-
-        return player_names
+        # Return empty list if there was an error
+        return [], ""
         

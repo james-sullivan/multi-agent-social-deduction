@@ -51,6 +51,7 @@ class EventType(Enum):
     
     # Special character events
     SCARLET_WOMAN_TRANSFORM = "scarlet_woman_transform"
+    IMP_TRANSFORM = "imp_transform"
     MAYOR_WIN = "mayor_win"
 
 @dataclass
@@ -182,6 +183,7 @@ class GameEventTracker:
             EventType.VIRGIN_POWER: "\033[1;35m",         # Bold magenta
             # Special character events
             EventType.SCARLET_WOMAN_TRANSFORM: "\033[1;95m", # Bright magenta
+            EventType.IMP_TRANSFORM: "\033[1;91m",            # Bright red
             EventType.MAYOR_WIN: "\033[1;32m",                # Bold green
         }
         
@@ -233,6 +235,7 @@ class GameEventTracker:
             EventType.VIRGIN_POWER: "👰 VIRGIN",
             # Special character events
             EventType.SCARLET_WOMAN_TRANSFORM: "🔄 SCARLET WOMAN",
+            EventType.IMP_TRANSFORM: "🔥 IMP TRANSFORM",
             EventType.MAYOR_WIN: "🏛️ MAYOR WIN",
         }
         
