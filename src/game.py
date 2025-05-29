@@ -100,6 +100,7 @@ class Game:
         self._drunk_and_poisoned: dict[Player, list[Player]] = {player: [] for player in self._players}
         self._chopping_block: tuple[int, Player] | None = None
         self._nominations_open: bool = False
+        self._mayor_kill_deflected: bool = False
         self._script: Script = script
         self._model: str = model
         
@@ -795,7 +796,19 @@ class Game:
                 return
             
             choice = self._player_dict[target_name]
-            
+
+            # Check for Mayor redirecting the kill
+            if (choice.character == Townsfolk.MAYOR and choice.alive
+                and not self._is_drunk_or_poisoned(choice) and not self._mayor_kill_deflected):
+                # The order we look for alternative targets to deflect the kill to
+                alternative_choices = [Outsider.BUTLER, Townsfolk.WASHERWOMAN, Townsfolk.LIBRARIAN, Townsfolk.INVESTIGATOR, Townsfolk.CHEF, \
+                                       Outsider.RECLUSE, Townsfolk.RAVENKEEPER, Townsfolk.MONK, Townsfolk.VIRGIN, Townsfolk.SOLDIER]
+                for character in alternative_choices:
+                    if character in self._character_dict and self._character_dict[character].alive:
+                        choice = self._character_dict[character]
+                        self._mayor_kill_deflected = True
+                        break
+
             self._reminder_tokens[Demon.IMP][ReminderTokens.IMP_KILLED] = choice
 
             if not self._safe_from_demon(choice) and not self._is_drunk_or_poisoned(player):

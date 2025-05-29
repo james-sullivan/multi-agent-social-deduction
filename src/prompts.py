@@ -8,7 +8,7 @@ The game is moderated by the Storyteller who is a neutral agent that will enforc
 ## Objectives
 The Good team wins if they execute the Demon.
 
-The Evil team wins if there are only 2 players left alive (and the Demon is still alive).
+The Evil team wins if there are only 2 players left alive no matter what team they are on.
 
 ## Gameplay
 The game is played in rounds. Each round has a night phase and then a day phase. The game continues until either team wins.
