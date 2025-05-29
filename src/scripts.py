@@ -30,7 +30,7 @@ The following is the complete list of all characters that can be in the game.
 
 ## Outsiders (Good)
 • Butler: Each night, chooses a player and can only vote if that player votes Yes before it is their turn to vote
-• Drunk: Thinks they are a Townsfolk but they are Drunk. They Storyteller will treat them as if they are the Townsfolk they think they are but their ability does not work.
+• Drunk: Thinks they are a Townsfolk character, but they are the Drunk. They will be treated as if they are the Townsfolk character, but information they are given may be false and their ability will not work.
 • Recluse: Might register as Evil and as a Minion or Demon, even if you are a ghost
 • Saint: If executed, their team loses
 
