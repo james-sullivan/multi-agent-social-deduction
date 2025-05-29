@@ -135,8 +135,8 @@ You are on the {self.alignment.name} team.
 Remember to always act with your team's win condition in mind. Analyze the current game state carefully before making decisions.
 
 IMPORTANT:
-- Dead players can still receive and send messages
-- Do not exclude dead players from messages just because they are dead
+- Ghost players can still receive and send messages
+- Do not exclude ghost players from messages just because they are ghosts
 - Information you receive is potentially false because of drunkenness, poisioning, and players lying
 - You will never have perfect information, do not wait for perfect information to take action or to vote YES on a nomination
 - The day will be played in cycles where each player gets one chance to act per cycle. The order that players act in is randomized at the start of each cycle. 
@@ -169,7 +169,7 @@ IMPORTANT:
 
 <current_state>
 It is round {public_game_state.round_number} and the current phase is {public_game_state.current_phase}.
-You are {'alive' if self.alive else f'dead and you have {'not' if not self.used_dead_vote else ''} used your dead vote'}. 
+You are {'alive' if self.alive else f'a ghost and you have {'not' if not self.used_dead_vote else ''} used your ghost vote'}. 
 You have {"not" if self.used_nomination else ""} nominated today.
 </current_state>
 
@@ -232,7 +232,7 @@ You have {"not" if self.used_nomination else ""} nominated today.
         """
         
         if not self.alive and self.used_dead_vote:
-            return Vote.CANT_VOTE, "Cannot vote - already used dead vote", "Cannot vote - already used dead vote"
+            return Vote.CANT_VOTE, "Cannot vote - already used ghost vote", "Cannot vote - already used ghost vote"
 
         # The butler cannot vote if the player they chose didn't vote yes
         if butler_player_choice:
@@ -338,9 +338,10 @@ IMPORTANT: You do not need perfect information to vote YES on a nomination. Both
         }
         
         # Add any once-per-game tools that haven't been used yet
-        for action, used in self.used_once_per_game.items():
-            if not used and action in action_to_tool:
-                available_tools.append(action_to_tool[action])
+        if self.alive:
+            for action, used in self.used_once_per_game.items():
+                if not used and action in action_to_tool:
+                    available_tools.append(action_to_tool[action])
 
         # Always allow messaging
         available_tools.append(get_message_tool([player['name'] for player in public_game_state.player_state]))

@@ -18,11 +18,11 @@ During the day players can send messages to each other to persuade, strategize, 
 During the night the Storyteller will secretly give information to players based on their character's ability or allow them to secretly use their ability. All information at night is secret and only the player receiving the information or using their ability knows about it.
 
 ## Nomination for Execution
-Towards the end of the day the Storyteller will allow players to nominate each other for execution. Each living player can only nominate one person per day and each person may only be nominated once per day. You can nominate any player including yourself or any other living or dead player.
+Towards the end of the day the Storyteller will allow players to nominate each other for execution. Each living player can only nominate one person per day and each person may only be nominated once per day. You can nominate any player including yourself or any other living or ghost player.
 
 During a nomination each player will vote starting with the player who is being nominated and proceeding left to right until all players have voted. Players can vote yes or no. When each player votes, they first get to see the votes of the players who voted before them. 
 
-The number of votes needed for a successful nomination is at least half of the living players rounded up. If a player is successfully nominated, future nominations will need to exceed the number of votes previously cast for that player to become the next nominee. If there is a tie, neither player is nominated and both players are safe for the day. At the end of the day, the currently nominated player will be executed. You do NOT learn what character players are when they die.
+The number of votes needed for a successful nomination is at least half of the living players rounded up. If a player is successfully nominated, future nominations will need to exceed the number of votes previously cast for that player to become the next nominee. If there is a tie, neither player is nominated and both players are safe for the day. At the end of the day, the currently nominated player will be executed and will become a ghost player. You do NOT learn what character players are when they die or what team they are on.
 
 ## Alignment
 The alignment of a player is the team they are on. A player can be on the Good team or the Evil team. By default, Townsfolk and Outsiders are Good players. Minions and the Demon are Evil players.
@@ -35,11 +35,11 @@ The Good team is made up of Townsfolk and Outsiders. Townsfolk are Good players 
 
 The Evil team is made up of one Demon and one to three Minions. The Demon is the most important Evil player and the player that the Good team is trying to kill. Minions are also Evil players who have an ability that is helpful to the Evil team. At the start of the game, the Demon is secretly told three good players that are not in play so the evil team can bluff as those roles.
 
-## Dead Players
-Dead players are still in the game and can still talk to other players, but they no longer have their character's ability, they cannot nominate players for execution, and they only get one vote for the rest of the game.
+## Ghost Players
+Ghost players are still in the game and can still talk to other players, but they no longer have their character's ability, they cannot nominate players for execution, and they only get one vote for the rest of the game.
 
 ## Being Poisoned and Drunk
-Poisoned and Drunk are status effects that can be applied to players. They function the exact same way and a player will not know if they are Poisoned or Drunk. If a player is Poisoned or Drunk their character's ability will not work and any information that they receive from the Storyteller may be false.
+Poisoned and Drunk are status effects that can be applied to players. They function the exact same way and a player will not know if they are Poisoned or Drunk. If a player is Poisoned or Drunk their character's ability will not work and any information that they receive from the Storyteller may be false. The Drunk is an Outsider who is told that they are one of the Townsfolk characters.
 
 ## Registers
 The rules and characters abilities sometimes talk about a player "registering" as good/evil, a particular role, or a particular character. This means that the game mechanics will treat them as the character, alignment, or role they are registering as, even if they are not that character, alignment, or role. For example, if a player "might" register as evil, then the Storyteller can decide to show another player a demon character when another player uses their ability to check what character they are.

@@ -23,7 +23,7 @@ The following is the complete list of all characters that can be in the game.
 • Undertaker: Each night (except the first), learns which character died by execution that day (players killed by the Demon are not considered executed)
 • Monk: Each night (except the first), chooses a player to protect from the Demon's attack
 • Ravenkeeper: If dies at night, wakes to choose a player and learn their character
-• Virgin: The first time nominated, if the nominator is a Townsfolk, the nominator dies immediately and the nomination continues.
+• Virgin: The first time nominated, if the nominator is a Townsfolk (Good), the nominator is executed immediately and the day ends.
 • Slayer: Once per game during the day, publicly choose a player; if they're the Demon, they die
 • Mayor: If only 3 players live and no execution occurs, their team wins; if they die at night, the Storyteller might choose another player to die instead
 • Soldier: Cannot be killed by the Demon
@@ -31,7 +31,7 @@ The following is the complete list of all characters that can be in the game.
 ## Outsiders (Good)
 • Butler: Each night, chooses a player and can only vote if that player votes Yes before it is their turn to vote
 • Drunk: Thinks they are a Townsfolk but they are Drunk. They Storyteller will treat them as if they are the Townsfolk they think they are but their ability does not work.
-• Recluse: Might register as Evil and as a Minion or Demon, even if dead
+• Recluse: Might register as Evil and as a Minion or Demon, even if you are a ghost
 • Saint: If executed, their team loses
 
 ## Minions (Evil)

@@ -82,7 +82,7 @@ def create_game(config, debug=False):
     characters = [
         Demon.IMP,
         Minion.SCARLET_WOMAN,
-        Outsider.SAINT,
+        Outsider.DRUNK,
         Townsfolk.SLAYER,
         Townsfolk.EMPATH,
         Townsfolk.FORTUNETELLER,

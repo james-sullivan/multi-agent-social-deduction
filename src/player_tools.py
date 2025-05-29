@@ -15,7 +15,7 @@ def get_message_tool(player_names: list[str]) -> ToolParam:
                         "type": "string",
                         "enum": player_names
                     },
-                    "description": "The players you want to send the message to. IMPORTANT: DEAD PLAYERS ARE STILL PLAYING THE GAME, THEY CAN STILL RECEIVE MESSAGES AND PLAY AN IMPORTANT ROLE IN THE GAME. DO NOT EXCLUDE DEAD PLAYERS JUST BECAUSE THEY ARE DEAD."
+                    "description": "The players you want to send the message to. IMPORTANT: GHOST PLAYERS ARE STILL PLAYING THE GAME, THEY CAN STILL RECEIVE MESSAGES AND PLAY AN IMPORTANT ROLE IN THE GAME. DO NOT EXCLUDE GHOST PLAYERS JUST BECAUSE THEY ARE GHOSTS."
                 },
                 "message": {
                     "type": "string",
@@ -82,14 +82,14 @@ def get_nomination_tool(nominatable_players: list[str]) -> ToolParam:
     """Generate a nomination tool with the current list of nominatable players."""
     return ToolParam(
         name="nominate",
-        description="Nominate a player for execution. This should not be done lightly. This will start a vote to execute the nominated player. You can only nominate once per day and each player can only be nominated once per day. You must provide both private reasoning (for your own strategic thinking) and public reasoning (what others will hear).",
+        description="Nominate a player for execution. This will start a vote to execute the nominated player. You can only nominate once per day and each player can only be nominated once per day. You must provide both private reasoning (for your own strategic thinking) and public reasoning (what others will hear).",
         input_schema={
             "type": "object",
             "properties": {
                 "player": {
                     "type": "string",
                     "enum": nominatable_players,
-                    "description": "The player to nominate for execution. For example, Robert or Dedra."
+                    "description": "The name of the player to nominate for execution."
                 },
                 "private_reasoning": {
                     "type": "string",

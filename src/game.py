@@ -724,10 +724,10 @@ class Game:
         # The Spy sees the complete game state (the "Grimoire")
         grimoire_info = []
         
-        # All players and their true characters (dead and alive)
+        # All players and their true characters (ghost and alive)
         grimoire_info.append("=== PLAYER CHARACTERS ===")
         for p in self._players:
-            status = "ALIVE" if p.alive else "DEAD"
+            status = "ALIVE" if p.alive else "GHOST"
             grimoire_info.append(f"{p.name}: {p.character.value} ({status})")
         
         # Drunk and poisoned status
@@ -740,7 +740,7 @@ class Game:
         
         # Active reminder tokens
         if self._reminder_tokens:
-            grimoire_info.append("\n=== ACTIVE REMINDER TOKENS ===")
+            grimoire_info.append("\n=== ACTIVE REMINDER TOKENS ===\nThese tokens are used to track information about players such who the Fortuneteller's Red Herring is.")
             for character, tokens in self._reminder_tokens.items():
                 for token, target_player in tokens.items():
                     if target_player:
@@ -1032,7 +1032,14 @@ class Game:
                                     "minions": [{"name": player.name, "character": player.character.value} for player in minions]
                                 })
 
-            self._broadcast_info("Storyteller", minions, f"The Demon is {demon.name}.", EventType.MINION_INFO,
+            # Create minion info message
+            if len(minions) == 1:
+                minion_info = f"The Demon is {demon.name}. You are the only minion."
+            else:
+                minion_names = [minion.name for minion in minions]
+                minion_info = f"The Demon is {demon.name}. Your fellow minions are {', '.join(minion_names)}."
+            
+            self._broadcast_info("Storyteller", minions, minion_info, EventType.MINION_INFO,
                                 metadata={
                                     "demon": demon.name,
                                     "demon_character": demon.character.value,
@@ -1099,7 +1106,7 @@ class Game:
             if died_during_night:
                 if len(died_during_night) == 1:
                     dead_player_name = list(died_during_night)[0]
-                    self._broadcast_info("Storyteller", self._all_players(), f"This morning, {dead_player_name} was found dead.", 
+                    self._broadcast_info("Storyteller", self._all_players(), f"This morning, {dead_player_name} was found dead and is now a ghost.", 
                                         EventType.DEATH_ANNOUNCEMENT,
                                         metadata={
                                             "dead_players": [dead_player_name],
@@ -1107,7 +1114,7 @@ class Game:
                                         })
                 else:
                     dead_players = ", ".join(sorted(died_during_night))
-                    self._broadcast_info("Storyteller", self._all_players(), f"This morning, {dead_players} were found dead.", 
+                    self._broadcast_info("Storyteller", self._all_players(), f"This morning, {dead_players} were found dead and are now ghosts.", 
                                         EventType.DEATH_ANNOUNCEMENT,
                                         metadata={
                                             "dead_players": sorted(list(died_during_night)),
@@ -1181,7 +1188,7 @@ class Game:
         # If the nominee is the Virgin and they haven't used their power yet, use their power
         if nominee.character == Townsfolk.VIRGIN and ReminderTokens.VIRGIN_POWER_USED not in self._reminder_tokens.get(Townsfolk.VIRGIN, {}):
             self._reminder_tokens[Townsfolk.VIRGIN] = {ReminderTokens.VIRGIN_POWER_USED: nominee}
-            if Townsfolk in self._get_player_roles(player):            
+            if Townsfolk in self._get_player_roles(player) and not self._is_drunk_or_poisoned(nominee):            
                 self._kill_player(player)
                 self._broadcast_info(sender="Storyteller",
                                     recipients=self._all_players(), 
