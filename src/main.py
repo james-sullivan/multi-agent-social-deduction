@@ -77,6 +77,16 @@ def create_game(config, debug=False):
         Townsfolk.UNDERTAKER,
         Outsider.DRUNK
     ]
+
+    characters = [
+        Demon.IMP,
+        Minion.SPY,
+        Townsfolk.SLAYER,
+        Townsfolk.EMPATH,
+        Townsfolk.FORTUNETELLER,
+        Outsider.RECLUSE,
+        
+    ]
     '''
 
     characters = [

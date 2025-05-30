@@ -142,7 +142,7 @@ class Game:
 
         # Investigator setup
         if Townsfolk.INVESTIGATOR in self._character_dict:
-            minion_players = [player for player in self._players if isinstance(player.character, Minion)]
+            minion_players = [player for player in self._players if Minion in self._get_player_roles(player)]
             # Filter out the Spy if we can
             minion_players = [player for player in minion_players if player.character != Minion.SPY] if len(minion_players) > 1 else minion_players
             non_minion_players = [player for player in self._players if not isinstance(player.character, Minion)]
@@ -160,7 +160,7 @@ class Game:
 
         # Washerwoman setup
         if Townsfolk.WASHERWOMAN in self._character_dict:
-            townsfolk_players = [player for player in self._players if isinstance(player.character, Townsfolk)]
+            townsfolk_players = [player for player in self._players if Townsfolk in self._get_player_roles(player)]
             non_townsfolk_players = [player for player in self._players if not isinstance(player.character, Townsfolk)]
             
             # Try to avoid overlap with other reminder tokens
@@ -181,7 +181,7 @@ class Game:
 
         # Librarian setup
         if Townsfolk.LIBRARIAN in self._character_dict:
-            outsider_players = [player for player in self._players if isinstance(player.character, Outsider)]
+            outsider_players = [player for player in self._players if Outsider in self._get_player_roles(player)]
             non_outsider_players = [player for player in self._players if not isinstance(player.character, Outsider)]
             if outsider_players:
                 # Try to avoid overlap with other reminder tokens
