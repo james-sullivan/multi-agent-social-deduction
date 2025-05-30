@@ -24,7 +24,7 @@ The following is the complete list of all characters that can be in the game.
 • Monk: Each night (except the first), chooses a player to protect from the Demon's attack
 • Ravenkeeper: If dies at night, wakes to choose a player and learn their character
 • Virgin: The first time nominated, if the nominator is a Townsfolk (Good), the nominator is executed immediately and the day ends.
-• Slayer: Once per game during the day, publicly choose a player; if they're the Demon, they die
+• Slayer: Once per game during the day, publicly choose a player; if they're the Demon, they die. This will not kill Minions. Any player can attempt to use the Slayer ability but only the real Slayer can kill the Demon.
 • Mayor: If only 3 players live and no execution occurs, their team wins; if they die at night, the Storyteller might choose another player to die instead
 • Soldier: Cannot be killed by the Demon
 

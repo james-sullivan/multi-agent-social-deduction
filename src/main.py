@@ -81,13 +81,11 @@ def create_game(config, debug=False):
 
     characters = [
         Demon.IMP,
-        Minion.SCARLET_WOMAN,
-        Outsider.DRUNK,
+        Minion.POISONER,
         Townsfolk.SLAYER,
         Townsfolk.EMPATH,
         Townsfolk.FORTUNETELLER,
-        Townsfolk.MAYOR,
-        Townsfolk.VIRGIN
+        Outsider.DRUNK,
     ]
 
     # Create game with hardcoded characters
@@ -98,6 +96,7 @@ def create_game(config, debug=False):
         #model=config.get("model", "claude-3-5-haiku-20241022"),
         model="claude-sonnet-4-20250514",
         #model=config.get("model", "claude-opus-4-20250514"),
+        thinking_token_budget=1024
     )
     return game
 

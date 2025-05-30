@@ -19,7 +19,10 @@ MODEL_PRICING = {
     "claude-3-5-sonnet-20240620": (3.00, 15.00),  # Earlier version
     "claude-3-5-haiku-20241022": (0.80, 4.00),
     
-    # Claude 4 Family
+    # Claude 3.7 Family (supports extended thinking)
+    "claude-3-7-sonnet-20250219": (3.00, 15.00),
+    
+    # Claude 4 Family (supports extended thinking)
     "claude-sonnet-4-20250514": (3.00, 15.00),
     "claude-opus-4-20250514": (15.00, 75.00),
 }
@@ -263,7 +266,8 @@ class CreateMessageArgs(TypedDict, total=False):
     system: Union[str, List[SystemContentBlock]]
     messages: List[MessageParam]
     tools: List[ToolParam]
-    tool_choice: Dict[str, str]
+    tool_choice: Dict[str, Any]
+    thinking: Dict[str, Union[str, int]]
 
 class CacheMetrics(TypedDict, total=False):
     input_tokens: int
@@ -319,27 +323,29 @@ def request_llm_response(
     max_tokens: int = 1024,
     tools: Optional[List[ToolParam]] = None,
     cache_tools: bool = True,
-    return_metrics: bool = False,
     cached_system_prompt_strs: List[str] = [],
-    non_cached_system_prompt_strs: List[str] = []
-) -> Union[str, Dict[str, Any]]:
+    non_cached_system_prompt_strs: List[str] = [],
+    thinking_token_budget: int = 0
+) -> dict[str, Any]:
     """
     Send a request to the LLM and return the response.
     
     Args:
         user_message: User message content
         model: Model to use
-        max_tokens: Maximum tokens in response
+        max_tokens: Maximum tokens in not including thinking tokens
         tools: Optional list of tools to use
         cache_tools: Whether to cache the tool definitions
-        return_metrics: Whether to return cache metrics along with response
         cached_system_prompt_strs: List of system prompt strings to cache (up to 4 blocks)
         non_cached_system_prompt_strs: List of system prompt strings that won't be cached
+        thinking_enabled: Whether to enable extended thinking mode (1024 token budget)
         
     Returns:
         Either a string response (when no tools) or a dict with tool usage info
-        If return_metrics=True, returns a dict with 'response' and 'metrics' keys
     """
+    assert thinking_token_budget == 0 or thinking_token_budget >= 1024, "Thinking token budget must be 0 or >= 1024"
+    max_tokens += thinking_token_budget
+
     try:
         # Prepare message
         messages: List[MessageParam] = [
@@ -355,6 +361,13 @@ def request_llm_response(
             "max_tokens": max_tokens,
             "messages": messages
         }
+        
+        # Add thinking configuration if enabled
+        if thinking_token_budget >= 1024:
+            args["thinking"] = {
+                "type": "enabled",
+                "budget_tokens": thinking_token_budget
+            }
         
         system_blocks: List[SystemContentBlock] = []
         
@@ -379,66 +392,40 @@ def request_llm_response(
         # Add tools if provided
         if tools:
             args["tools"] = tools
-            args["tool_choice"] = {"type": "any"}
+            args["tool_choice"] = {"type": "auto", "disable_parallel_tool_use": True}
         
         # Log the full request for debugging
         log_full_request(cast(Dict[str, Any], args), user_message)
         
-        # Make API call
         client = get_client()
         message = client.messages.create(**cast(Dict[str, Any], args))
         
         # Log cache metrics
         cache_enabled = len(cached_system_prompt_strs) > 0 or (cache_tools and tools is not None)
-        cache_metrics = log_cache_metrics(message.usage, cache_enabled, model)
+        log_cache_metrics(message.usage, cache_enabled, model)
         
-        # Handle response based on whether tools were used
-        if tools:
-            # Check for tool usage
-            for content_block in message.content:
-                if hasattr(content_block, 'type') and content_block.type == "tool_use":
-                    # Return tool usage information
-                    tool_response = {
-                        "function_name": content_block.name,
-                        "arguments": content_block.input if hasattr(content_block, 'input') else {}
-                    }
-                    log_full_response(tool_response, model)
-                    if return_metrics:
-                        return {"response": tool_response, "metrics": cache_metrics}
-                    return tool_response
-            # No tool was used, return text response if available
-            for content_block in message.content:
-                if hasattr(content_block, 'type') and content_block.type == "text":
-                    text_response = content_block.text
-                    log_full_response(text_response, model)
-                    if return_metrics:
-                        return {"response": text_response, "metrics": cache_metrics}
-                    return text_response
-            empty_response = ""
-            log_full_response(empty_response, model)
-            if return_metrics:
-                return {"response": empty_response, "metrics": cache_metrics}
-            return empty_response
-        else:
-            # Just return the text response
-            for content_block in message.content:
-                if hasattr(content_block, 'type') and content_block.type == "text":
-                    text_response = content_block.text
-                    log_full_response(text_response, model)
-                    if return_metrics:
-                        return {"response": text_response, "metrics": cache_metrics}
-                    return text_response
-            empty_response = ""
-            log_full_response(empty_response, model)
-            if return_metrics:
-                return {"response": empty_response, "metrics": cache_metrics}
-            return empty_response
+        # Extract thinking content if enabled
+        thinking_content = ""
+        for content_block in message.content:
+            if hasattr(content_block, 'type') and content_block.type == "thinking":
+                thinking_content = content_block.thinking if hasattr(content_block, 'thinking') else str(content_block)
+                break
+
+        return_content: Dict[str, Any] = {"thinking": thinking_content}
+        
+        for content_block in message.content:
+            if hasattr(content_block, 'type') and content_block.type == "tool_use":
+                # Return tool usage information
+                return_content["function_name"] = content_block.name
+                return_content["arguments"] = content_block.input if hasattr(content_block, 'input') else {}
+            elif hasattr(content_block, 'type') and content_block.type == "text":
+                return_content["response"] = content_block.text
+        
+        return return_content
             
     except Exception as e:
         print(f"Error making API request: {e}")
-        if return_metrics:
-            return {"response": "" if not tools else {}, "metrics": {}}
-        return "" if not tools else {}
+        return {}
 
 
 

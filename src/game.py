@@ -28,6 +28,7 @@ class PublicGameState:
     round_number: int
     chopping_block: ChoppingBlockInfo | None
     nominatable_players: list[str]
+    players_who_can_nominate: list[str]
     original_role_counts: dict[str, int]
 
 class Game:
@@ -38,7 +39,8 @@ class Game:
                  townsfolk_count: int = 0, 
                  minion_count: int = 0, 
                  random_seed: int | None = None,
-                 model: str = "claude-3-5-haiku-20241022"):
+                 model: str = "claude-3-5-haiku-20241022",
+                 thinking_token_budget: int = 0):
         assert characters is not None or (sum([outsider_count, townsfolk_count, minion_count]) >= 4), \
         "Must provide at least 5 characters or specify counts for each role"
 
@@ -63,16 +65,16 @@ class Game:
         if characters:
             for character in characters:
                 alignment = self._get_character_alignment(character)
-                self._players.append(Player(name=names.pop(), alignment=alignment, character=character, model=model))
+                self._players.append(Player(name=names.pop(), alignment=alignment, character=character, model=model, thinking_token_budget=thinking_token_budget))
         else:
             demon_char = demons.pop()
             alignment = self._get_character_alignment(demon_char)
-            self._players.append(Player(name=names.pop(), alignment=alignment, character=demon_char, model=model))
+            self._players.append(Player(name=names.pop(), alignment=alignment, character=demon_char, model=model, thinking_token_budget=thinking_token_budget))
 
             for _ in range(minion_count):
                 minion_char = minions.pop()
                 alignment = self._get_character_alignment(minion_char)
-                self._players.append(Player(name=names.pop(), alignment=alignment, character=minion_char, model=model))
+                self._players.append(Player(name=names.pop(), alignment=alignment, character=minion_char, model=model, thinking_token_budget=thinking_token_budget))
                 if self._players[-1].character == Minion.BARON:
                     outsider_count += 2
                     townsfolk_count = max(townsfolk_count - 2, 0)
@@ -80,13 +82,13 @@ class Game:
             for _ in range(outsider_count):
                 outsider_char = outsiders.pop()
                 alignment = self._get_character_alignment(outsider_char)
-                player = Player(name=names.pop(), alignment=alignment, character=outsider_char, model=model)
+                player = Player(name=names.pop(), alignment=alignment, character=outsider_char, model=model, thinking_token_budget=thinking_token_budget)
                 self._players.append(player)
 
             for _ in range(townsfolk_count):
                 townsfolk_char = townsfolk.pop()
                 alignment = self._get_character_alignment(townsfolk_char)
-                self._players.append(Player(name=names.pop(), alignment=alignment, character=townsfolk_char, model=model))
+                self._players.append(Player(name=names.pop(), alignment=alignment, character=townsfolk_char, model=model, thinking_token_budget=thinking_token_budget))
 
         random.shuffle(self._players)
 
@@ -211,7 +213,8 @@ class Game:
                 "player_count": len(self._players),
                 "players": [p.name for p in self._players],
                 "script": self._script.__class__.__name__,
-                "model": self._model
+                "model": self._model,
+                "thinking_token_budget": thinking_token_budget
             }
         )
 
@@ -273,7 +276,19 @@ class Game:
         if self._nominations_open:
             nominatable_players = [
                 player.name for player in self._players 
-                if not player.nominated_today
+                if not player.nominated_today and player.alive
+            ]
+        
+        # Determine which players can nominate
+        # Players can nominate if:
+        # 1. They are alive
+        # 2. They haven't used their nomination yet today
+        # 3. Nominations are currently open (self._nominations_open = True)
+        nominating_players = []
+        if self._nominations_open:
+            nominating_players = [
+                player.name for player in self._players
+                if player.alive and not player.used_nomination
             ]
         
         return PublicGameState(
@@ -283,6 +298,7 @@ class Game:
             round_number=self._round_number,
             chopping_block=chopping_block_info,
             nominatable_players=nominatable_players,
+            players_who_can_nominate=nominating_players,
             original_role_counts=self._original_role_counts
         )
 
@@ -640,7 +656,7 @@ class Game:
                             metadata={"player_name": player.name, "evil_count": evil_count, "neighbors": [left.name, right.name]})
 
     def _fortuneteller_power(self, player: Player, night_start_game_state: PublicGameState) -> None:
-        player_choice, reasoning = player.night_player_choice(night_start_game_state, FORTUNETELLER_PROMPT)
+        player_choice, reasoning, thinking = player.night_player_choice(night_start_game_state, FORTUNETELLER_PROMPT)
         
         try:
             if len(player_choice) != 2:
@@ -649,12 +665,13 @@ class Game:
             choice1: Player = self._player_dict[player_choice[0]]
             choice2: Player = self._player_dict[player_choice[1]]
             
-            # Check if this is a drunk player or if reminder tokens exist
+            # Check if this is a drunk or poisoned player
             if (self._is_drunk_or_poisoned(player) or 
                 Townsfolk.FORTUNETELLER not in self._reminder_tokens or 
                 ReminderTokens.RED_HERRING not in self._reminder_tokens[Townsfolk.FORTUNETELLER]):
-                # Give false information
-                either_is_demon_or_red_herring = random.choice([True, False])
+                either_is_demon_or_red_herring = (Demon in {choice1.character, choice2.character})
+                # The opposite of whatever the truth is
+                either_is_demon_or_red_herring = not either_is_demon_or_red_herring
             else:
                 # Get the red herring player
                 red_herring = self._reminder_tokens[Townsfolk.FORTUNETELLER][ReminderTokens.RED_HERRING]
@@ -672,7 +689,8 @@ class Game:
                                         "player_name": player.name,
                                         "choices": [choice1.name, choice2.name],
                                         "result": "yes",
-                                        "private_reasoning": reasoning
+                                        "private_reasoning": reasoning,
+                                        "thinking": thinking
                                     })
             else:
                 info_msg = f"No, neither {choice1.name} nor {choice2.name} is the Demon. Your reasoning: {reasoning}"
@@ -681,7 +699,8 @@ class Game:
                                         "player_name": player.name,
                                         "choices": [choice1.name, choice2.name],
                                         "result": "no",
-                                        "private_reasoning": reasoning
+                                        "private_reasoning": reasoning,
+                                        "thinking": thinking
                                     })
         except KeyError:
             logger.error(f"Player {player.name} tried to choose {player_choice} but one of them is not in the game.")
@@ -689,7 +708,7 @@ class Game:
             logger.error(f"Player {player.name} made invalid choice for Fortuneteller: {player_choice}. {str(e)}")
     
     def _poisoner_power(self, player: Player, night_start_game_state: PublicGameState) -> None:
-        player_choice, reasoning = player.night_player_choice(night_start_game_state, POISONER_PROMPT)
+        player_choice, reasoning, thinking = player.night_player_choice(night_start_game_state, POISONER_PROMPT)
         
         try:
             if not player_choice or len(player_choice) != 1:
@@ -716,7 +735,7 @@ class Game:
             self._drunk_and_poisoned[choice].append(player)
             
             self._broadcast_info("Storyteller", player, f"You have poisoned {choice.name} for the night and next day. Your reasoning: {reasoning}", EventType.POISONER_POWER,
-                                metadata={"player_name": player.name, "target": choice.name, "private_reasoning": reasoning})
+                                metadata={"player_name": player.name, "target": choice.name, "private_reasoning": reasoning, "thinking": thinking})
         except Exception as e:
             logger.error(f"Error in poisoner power for {player.name}: {str(e)}")
             self._broadcast_info("Storyteller", player, f"Something went wrong with your poisoning attempt. Your reasoning: {reasoning}")
@@ -761,7 +780,7 @@ class Game:
                             metadata={"player_name": player.name, "grimoire_info": grimoire_info})
 
     def _monk_power(self, player: Player, night_start_game_state: PublicGameState) -> None:
-        player_choice, reasoning = player.night_player_choice(night_start_game_state, MONK_PROMPT)
+        player_choice, reasoning, thinking = player.night_player_choice(night_start_game_state, MONK_PROMPT)
         
         try:
             if len(player_choice) != 1:
@@ -770,14 +789,14 @@ class Game:
             choice: Player = self._player_dict[player_choice[0]]
             self._reminder_tokens[Townsfolk.MONK][ReminderTokens.MONK_PROTECTED] = choice
             self._broadcast_info("Storyteller", player, f"You have protected {choice.name} from the Demon tonight. Your reasoning: {reasoning}", EventType.MONK_POWER,
-                                metadata={"player_name": player.name, "target": choice.name, "private_reasoning": reasoning})
+                                metadata={"player_name": player.name, "target": choice.name, "private_reasoning": reasoning, "thinking": thinking})
         except KeyError:
             logger.error(f"Player {player.name} tried to protect {player_choice[0]} but they are not in the game.")
         except ValueError:
             logger.error(f"Player {player.name} tried to protect {player_choice}. len(player_choice) != 1")
 
     def _imp_power(self, player: Player, night_start_game_state: PublicGameState) -> None:
-        player_choice, reasoning = player.night_player_choice(night_start_game_state, IMP_PROMPT)
+        player_choice, reasoning, thinking = player.night_player_choice(night_start_game_state, IMP_PROMPT)
         
         try:
             if not player_choice or len(player_choice) != 1:
@@ -814,7 +833,7 @@ class Game:
             if not self._safe_from_demon(choice) and not self._is_drunk_or_poisoned(player):
                 self._kill_player(choice, False, killed_by_demon=True)
                 self._broadcast_info("Storyteller", player, f"You have chosen to kill {choice.name} tonight. Your reasoning: {reasoning}", EventType.IMP_POWER,
-                                    metadata={"player_name": player.name, "target": choice.name, "success": True, "private_reasoning": reasoning})
+                                    metadata={"player_name": player.name, "target": choice.name, "success": True, "private_reasoning": reasoning, "thinking": thinking})
                 # If the Imp chose to kill themself, pick a minion to become the new Imp
                 if player.name == choice:
                     # Pick a minion to become the new Imp
@@ -828,11 +847,12 @@ class Game:
                                         "new_imp": new_imp.name, 
                                         "old_character": old_character.value,
                                         "new_character": new_imp.character.value,
-                                        "private_reasoning": reasoning
+                                        "private_reasoning": reasoning,
+                                        "thinking": thinking
                                     })
             else:
                 self._broadcast_info("Storyteller", player, f"You tried t o kill {choice.name} but they did not die. Your reasoning: {reasoning}", EventType.IMP_POWER,
-                                    metadata={"player_name": player.name, "target": choice.name, "success": False, "reason": "protected", "private_reasoning": reasoning})
+                                    metadata={"player_name": player.name, "target": choice.name, "success": False, "reason": "protected", "private_reasoning": reasoning, "thinking": thinking})
 
         except Exception as e:
             logger.error(f"Error in imp power for {player.name}: {str(e)}")
@@ -845,7 +865,7 @@ class Game:
             self._reminder_tokens[Townsfolk.RAVENKEEPER][ReminderTokens.RAVENKEEPER_WOKEN] is not player):
             return
         
-        player_choice, reasoning = player.night_player_choice(night_start_game_state, RAVENKEEPER_PROMPT)
+        player_choice, reasoning, thinking = player.night_player_choice(night_start_game_state, RAVENKEEPER_PROMPT)
         
         try:
             if len(player_choice) != 1:
@@ -866,7 +886,8 @@ class Game:
                                     "player_name": player.name,
                                     "target": choice.name,
                                     "learned_character": learned_character.value,
-                                    "private_reasoning": reasoning
+                                    "private_reasoning": reasoning,
+                                    "thinking": thinking
                                 })
             
             # Clear the reminder token after use
@@ -906,7 +927,7 @@ class Game:
         del self._reminder_tokens[Townsfolk.UNDERTAKER][ReminderTokens.UNDERTAKER_EXECUTED]
 
     def _butler_power(self, player: Player, night_start_game_state: PublicGameState) -> None:
-        player_choice, reasoning = player.night_player_choice(night_start_game_state, BUTLER_PROMPT)
+        player_choice, reasoning, thinking = player.night_player_choice(night_start_game_state, BUTLER_PROMPT)
         
         try:
             if len(player_choice) != 1:
@@ -922,7 +943,7 @@ class Game:
             self._reminder_tokens[Outsider.BUTLER][ReminderTokens.BUTLER_MASTER] = choice
             
             self._broadcast_info("Storyteller", player, f"You have chosen {choice.name} as your master. Tomorrow, you may only vote if they are voting too. Your reasoning: {reasoning}", EventType.BUTLER_POWER,
-                                metadata={"player_name": player.name, "master": choice.name, "private_reasoning": reasoning})
+                                metadata={"player_name": player.name, "master": choice.name, "private_reasoning": reasoning, "thinking": thinking})
             
         except KeyError:
             logger.error(f"Player {player.name} tried to choose {player_choice[0]} but they are not in the game.")
@@ -1156,7 +1177,8 @@ class Game:
             "target": action.target,
             "success": it_works,
             "private_reasoning": action.private_reasoning,
-            "public_reasoning": action.public_reasoning
+            "public_reasoning": action.public_reasoning,
+            "thinking": action.thinking
         }
 
         # If it works
@@ -1186,13 +1208,13 @@ class Game:
             logger.error(f"Player {player.name} tried to nominate {action.nominee} but they are not in the game.")
             self._broadcast_info("Storyteller", self._all_players(), f"{player.name} passed their turn.",
                                 description=f"{player.name} cannot nominate {action.nominee} (player not found).",
-                                metadata={"player_name": player.name, "nominee": action.nominee})
+                                metadata={"player_name": player.name, "nominee": action.nominee, "thinking": action.thinking})
             return False
         except ValueError:
             logger.error(f"Player {player.name} tried to nominate {action.nominee} but they have already been nominated today.")
             self._broadcast_info("Storyteller", self._all_players(), f"{player.name} cannot nominate {action.nominee} because they have already been nominated today.",
                                 description=f"{player.name} cannot nominate {action.nominee} because they have already been nominated today.",
-                                metadata={"player_name": player.name, "nominee": action.nominee})
+                                metadata={"player_name": player.name, "nominee": action.nominee, "thinking": action.thinking})
             return False
         
         nominee.nominated_today = True
@@ -1207,7 +1229,7 @@ class Game:
                                     recipients=self._all_players(), 
                                     info=f"{player.name} has nominated {nominee.name} for execution. {player.name} has been executed and the day is over.",
                                     event_type=EventType.VIRGIN_POWER,
-                                    metadata={"nominee": nominee.name, "nominator": player.name})
+                                    metadata={"nominee": nominee.name, "nominator": player.name, "thinking": action.thinking})
                 return True
 
         # Include chopping block information in the nomination announcement
@@ -1231,7 +1253,8 @@ class Game:
                                  "current_chopping_block": {
                                      "nominee": self._chopping_block[1].name if self._chopping_block else None,
                                      "votes": self._chopping_block[0] if self._chopping_block else None
-                                 }
+                                 },
+                                 "thinking": action.thinking
                              })
 
         if self._chopping_block:
@@ -1245,7 +1268,12 @@ class Game:
 
         count = 0
         previous_votes: list[tuple[str, Vote, str, str]] = []  # Now includes private and public reasoning
-        for player in self._players:
+        
+        # Start voting with the nominee, then continue with other players
+        nominee_index = self._players.index(nominee)
+        voting_order = self._players[nominee_index:] + self._players[:nominee_index]
+        
+        for player in voting_order:
             # Check if this player is the Butler and has a master choice
             butler_master_choice = None
             if (player.character == Outsider.BUTLER and 
@@ -1253,7 +1281,7 @@ class Game:
                 ReminderTokens.BUTLER_MASTER in self._reminder_tokens[Outsider.BUTLER]):
                 butler_master_choice = self._reminder_tokens[Outsider.BUTLER][ReminderTokens.BUTLER_MASTER].name
             
-            vote, private_reasoning, public_reasoning = player.vote(
+            vote, private_reasoning, public_reasoning, thinking = player.vote(
                 nominee=nominee.name,
                 public_game_state=self._get_public_game_state(),
                 current_tally=count,
@@ -1278,7 +1306,8 @@ class Game:
                     "nominee": nominee.name,
                     "vote": vote.value,
                     "private_reasoning": private_reasoning,
-                    "public_reasoning": public_reasoning
+                    "public_reasoning": public_reasoning,
+                    "thinking": thinking
                 }
             )
             
@@ -1292,7 +1321,8 @@ class Game:
             "votes": count,
             "required_to_nominate": required_to_nominate,
             "required_to_tie": required_to_tie,
-            "vote_details": [{"voter": name, "vote": vote.value, "private_reasoning": private_reasoning, "public_reasoning": public_reasoning} for name, vote, private_reasoning, public_reasoning in previous_votes]
+            "vote_details": [{"voter": name, "vote": vote.value, "private_reasoning": private_reasoning, "public_reasoning": public_reasoning} for name, vote, private_reasoning, public_reasoning in previous_votes],
+            "thinking": action.thinking
         }
         # Set result and message based on vote outcome
         if count >= required_to_nominate:
@@ -1361,7 +1391,8 @@ class Game:
                         metadata={
                             "sender": player.name,
                             "recipients": action.recipients,
-                            "message": action.message
+                            "message": action.message,
+                            "thinking": action.thinking
                         },
                         include_sender_in_history=True
                     )
@@ -1385,6 +1416,7 @@ class Game:
                         metadata={
                             "player_name": player.name,
                             "private_reasoning": action.private_reasoning,
+                            "thinking": action.thinking
                         }
                     )
                 if consecutive_passes >= len(self._players) and self._round_number > 1:
@@ -1483,7 +1515,7 @@ class Game:
                 self._run_night_phase()
 
                 for player in self._players:
-                    player.summarize_history(self._get_public_game_state(), clear_history=self._round_number > 1)
+                    thinking = player.summarize_history(self._get_public_game_state(), clear_history=self._round_number > 1)
                     
                     # Track the notes update event
                     self.event_tracker.add_event(
@@ -1496,7 +1528,8 @@ class Game:
                         metadata={
                             "player_name": player.name, 
                             "character": player.character.value, 
-                            "notes": player.notes
+                            "notes": player.notes,
+                            "thinking": thinking
                         }
                     )
 

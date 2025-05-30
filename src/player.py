@@ -1,7 +1,7 @@
 from __future__ import annotations
 from game_enums import Alignment, Vote
 from characters import Character
-from typing import Optional, List, TYPE_CHECKING
+from typing import Optional, List, TYPE_CHECKING, Any
 import logging
 
 if TYPE_CHECKING:
@@ -30,15 +30,15 @@ ONCE_PER_GAME_ACTIONS = [DayActions.SLAYER_POWER]
 @dataclass
 class DayAction:
     action: DayActions
-    reason: str
+    thinking: str
 
 @dataclass
 class MessageAction(DayAction):
     recipients: List[str]
     message: str
     
-    def __init__(self, recipients: List[str], message: str, reason: str = ""):
-        super().__init__(DayActions.MESSAGE, reason)
+    def __init__(self, recipients: List[str], message: str, thinking: str = ""):
+        super().__init__(DayActions.MESSAGE, thinking)
         self.recipients = recipients
         self.message = message
 
@@ -49,8 +49,8 @@ class NominationAction(DayAction):
     private_reasoning: str
     public_reasoning: str
     
-    def __init__(self, nominee: str, nominator: str, private_reasoning: str, public_reasoning: str):
-        super().__init__(DayActions.NOMINATION, private_reasoning)  # Use private reasoning as the internal reason
+    def __init__(self, nominee: str, nominator: str, private_reasoning: str, public_reasoning: str, thinking: str = ""):
+        super().__init__(DayActions.NOMINATION, thinking)  # Use private reasoning as the internal reason
         self.nominee = nominee
         self.nominator = nominator
         self.private_reasoning = private_reasoning
@@ -61,9 +61,9 @@ class SlayerPowerAction(DayAction):
     target: str
     private_reasoning: str
     public_reasoning: str
-    
-    def __init__(self, target: str, private_reasoning: str, public_reasoning: str):
-        super().__init__(DayActions.SLAYER_POWER, private_reasoning)  # Use private reasoning as internal reason
+
+    def __init__(self, target: str, private_reasoning: str, public_reasoning: str, thinking: str = ""):
+        super().__init__(DayActions.SLAYER_POWER, thinking)  # Use private reasoning as internal reason
         self.target = target
         self.private_reasoning = private_reasoning
         self.public_reasoning = public_reasoning
@@ -74,8 +74,8 @@ class VoteAction(DayAction):
     private_reasoning: str
     public_reasoning: str
     
-    def __init__(self, vote: Vote, private_reasoning: str, public_reasoning: str):
-        super().__init__(DayActions.VOTE, private_reasoning)  # Use private reasoning as internal reason
+    def __init__(self, vote: Vote, private_reasoning: str, public_reasoning: str, thinking: str = ""):
+        super().__init__(DayActions.VOTE, thinking)  # Use private reasoning as internal reason
         self.vote = vote
         self.private_reasoning = private_reasoning
         self.public_reasoning = public_reasoning
@@ -84,13 +84,13 @@ class VoteAction(DayAction):
 class NoAction(DayAction):
     private_reasoning: str
     
-    def __init__(self, private_reasoning: str = "No action taken"):
-        super().__init__(DayActions.NO_ACTION, private_reasoning)
+    def __init__(self, private_reasoning: str = "No action taken", thinking: str = ""):
+        super().__init__(DayActions.NO_ACTION, thinking)
         self.private_reasoning = private_reasoning
 
 
 class Player:
-    def __init__(self, name: str, alignment: Alignment, character: Character, drunk_character: Character | None = None, model: str = "claude-3-5-haiku-20241022") -> None:
+    def __init__(self, name: str, alignment: Alignment, character: Character, drunk_character: Character | None = None, model: str = "claude-3-5-haiku-20241022", thinking_token_budget: int = 0) -> None:
         self.name: str = name
         self.alive: bool = True
         self.history: list[str] = []
@@ -103,6 +103,7 @@ class Player:
         self.used_dead_vote: bool = False
         self.drunk_character: Character | None = None
         self.model: str = model
+        self.thinking_token_budget: int = thinking_token_budget
 
     def start_of_day(self) -> None:
         self.used_nomination = False
@@ -163,6 +164,13 @@ IMPORTANT:
         else:
             nomination_info = "No players can currently be nominated."
 
+        # Add nominating players information  
+        nominating_info = ""
+        if public_game_state.players_who_can_nominate:
+            nominating_info = f"Players who can currently nominate: {', '.join(public_game_state.players_who_can_nominate)}"
+        else:
+            nominating_info = "No players can currently nominate."
+
         return f"""<player_order>
 {player_state}
 </player_order>
@@ -176,6 +184,7 @@ You have {"not" if self.used_nomination else ""} nominated today.
 <game_state>
 {chopping_block_info}
 {nomination_info}
+{nominating_info}
 </game_state>
 
 <notes>
@@ -189,33 +198,32 @@ You have {"not" if self.used_nomination else ""} nominated today.
 </history>"""
 
 
-    def summarize_history(self, public_game_state: PublicGameState, clear_history: bool = True) -> None:
+    def summarize_history(self, public_game_state: PublicGameState, clear_history: bool = True) -> str:
         """Summarize the player's history into their notes using AI."""
-        if not self.history:
-            self.notes = "No notes so far."
-            return
         
         # Use prefix caching for better performance (no redundancy)
         user_message = "It's time to update your notes. This first half of your notes should be a summary of your history. After this update your history will be cleared so make sure that all of the important information is included in your notes. The second half of your notes should be five bullet points of actionable strategy advice that you want to follow to help your team win. If there are already five bullet points, update them based on the new information. Only give me your updated notes, no other text and use bullet points. You only need to note information that is not in the rest of your system prompt. Do not make this longer than 20 lines."
         
-        response = request_llm_response(
+        response: dict[str, Any] = request_llm_response(
             user_message=user_message,
             model=self.model,
             cached_system_prompt_strs=self._get_cached_system_prompt(public_game_state),
             non_cached_system_prompt_strs=[
                 self._get_dynamic_system_prompt(public_game_state),
                 self._get_history_prompt()
-            ]
+            ],
+            thinking_token_budget=self.thinking_token_budget
         )
         
-        if isinstance(response, str):
-            self.notes = response
+        if "response" in response:
+            self.notes = response["response"]
         else:
             logger.error(f"{self.name} failed to summarize history: {response}")
-            self.notes = "No notes so far."
 
         if clear_history:
             self.history = []
+
+        return response["thinking"] if "thinking" in response else ""
 
     def vote(self,
              nominee: str,
@@ -225,14 +233,14 @@ You have {"not" if self.used_nomination else ""} nominated today.
              required_to_nominate: int,
              previous_votes: list[tuple[str, Vote, str, str]],  # Now includes private and public reasoning
              nomination_action: NominationAction,
-                            butler_player_choice: str | None = None) -> tuple[Vote, str, str]:
+                            butler_player_choice: str | None = None) -> tuple[Vote, str, str, str]:
         """
         Use the voting tool to get the player's vote and reasoning.
         Returns a tuple of (Vote, private_reasoning, public_reasoning).
         """
         
         if not self.alive and self.used_dead_vote:
-            return Vote.CANT_VOTE, "Cannot vote - already used ghost vote", "Cannot vote - already used ghost vote"
+            return Vote.CANT_VOTE, "Cannot vote - already used ghost vote", "Cannot vote - already used ghost vote", ""
 
         # The butler cannot vote if the player they chose didn't vote yes
         if butler_player_choice:
@@ -242,11 +250,11 @@ You have {"not" if self.used_nomination else ""} nominated today.
                 if player_name == butler_player_choice:
                     # If the butler's choice didn't vote yes, we vote no
                     if vote != Vote.YES:
-                        return Vote.NO, "Butler restriction - master didn't vote yes", "Butler restriction - master didn't vote yes"
+                        return Vote.NO, "Butler restriction - master didn't vote yes", "Butler restriction - master didn't vote yes", ""
                     found_player = True
                     break
             if not found_player:
-                return Vote.NO, "Butler restriction - master hasn't voted yet", "Butler restriction - master hasn't voted yet"
+                return Vote.NO, "Butler restriction - master hasn't voted yet", "Butler restriction - master hasn't voted yet", ""
 
         # Nominator context
         if nomination_action.nominator == self.name:
@@ -288,12 +296,12 @@ You need to vote on the current nomination.
 
 {question}
 
-Use the vote tool to cast your vote and provide your reasoning. Your reasoning will be shared with all players who vote after you.
+You must use the vote tool to cast your vote and provide your reasoning. Your reasoning will be shared with all players who vote after you.
 
-IMPORTANT: You do not need perfect information to vote YES on a nomination. Both good and evil players need to vote YES to kill the other team and get closer to winning. Voting YES to kill the other team is an important part of the game.
+IMPORTANT: You do not need perfect information to vote YES on a nomination. Both good and evil players need to vote YES to kill the other team and get closer to winning. Voting YES to kill the other team is an important part of the game. Dead players should probably wait until later in the game to use their one ghost vote because that is when the decisions will be most important.
 """
         
-        response = request_llm_response(
+        response: dict[str, Any] = request_llm_response(
             user_message=user_message,
             model=self.model,
             cached_system_prompt_strs=self._get_cached_system_prompt(public_game_state),
@@ -301,11 +309,14 @@ IMPORTANT: You do not need perfect information to vote YES on a nomination. Both
                 self._get_dynamic_system_prompt(public_game_state),
                 self._get_history_prompt()
             ],
-            tools=[VOTE_TOOL]
+            tools=[VOTE_TOOL],
+            thinking_token_budget=self.thinking_token_budget
         )
+
+        thinking = response.get("thinking", "")
         
         # Handle the response
-        if isinstance(response, dict) and "function_name" in response:
+        if "function_name" in response:
             function_name = response["function_name"]
             arguments = response.get("arguments", {})
             
@@ -317,15 +328,15 @@ IMPORTANT: You do not need perfect information to vote YES on a nomination. Both
                 if vote_str == "YES":
                     if not self.alive:
                         self.used_dead_vote = True
-                    return Vote.YES, private_reasoning, public_reasoning
+                    return Vote.YES, private_reasoning, public_reasoning, thinking
                 elif vote_str == "NO":
-                    return Vote.NO, private_reasoning, public_reasoning
+                    return Vote.NO, private_reasoning, public_reasoning, thinking
                 else:
                     logger.error(f"{self.name} voted with invalid vote: {vote_str}")
-                    return Vote.NO, f"Invalid vote response: {vote_str}", f"Invalid vote response: {vote_str}"
+                    return Vote.NO, f"Invalid vote response: {vote_str}", f"Invalid vote response: {vote_str}", thinking
         
         logger.error(f"{self.name} failed to use voting tool properly: {response}")
-        return Vote.NO, "Failed to vote properly", "Failed to vote properly"
+        return Vote.NO, "Failed to vote properly", "Failed to vote properly", thinking
 
     def day_action(self, public_game_state: PublicGameState, nominations_open: bool = False, remaining_action_rounds: int = 0) -> Optional[DayAction]:
         available_tools: List[ToolParam] = []
@@ -357,9 +368,9 @@ IMPORTANT: You do not need perfect information to vote YES on a nomination. Both
         elif remaining_action_rounds == 0:
             rounds_info = " This is the final round of day actions before the day ends."
 
-        user_message = f"It is your turn to either take an action or pass.{rounds_info} Consider things like your notes, what team you are on, and what has happened so far. Be a little hesistant to nominate someone. What do you want to do?"
+        user_message = f"It is your turn to either take an action or pass. You must use one of the tools available to you.{rounds_info} Consider things like your notes, what team you are on, and what has happened so far. What do you want to do?"
         
-        response = request_llm_response(
+        response: dict[str, Any] = request_llm_response(
             user_message=user_message,
             model=self.model,
             cached_system_prompt_strs=self._get_cached_system_prompt(public_game_state),
@@ -367,45 +378,48 @@ IMPORTANT: You do not need perfect information to vote YES on a nomination. Both
                 self._get_dynamic_system_prompt(public_game_state),
                 self._get_history_prompt()
             ],
-            tools=available_tools
+            tools=available_tools,
+            thinking_token_budget=self.thinking_token_budget
         )
         
+        thinking = response.get("thinking", "")
+
         # Handle the response based on whether it's a tool response or not
-        if isinstance(response, dict) and "function_name" in response:
+        if "function_name" in response:
             function_name = response["function_name"]
             arguments = response.get("arguments", {})
             
             if function_name == "send_message":
                 recipients = arguments.get("recipients", [])
                 message_text = arguments.get("message", "")
-                return MessageAction(recipients, message_text)
+                return MessageAction(recipients, message_text, thinking)
                 
             elif function_name == "nominate":
                 player = arguments.get("player", "")
                 private_reasoning = arguments.get("private_reasoning", "No private reasoning provided")
                 public_reasoning = arguments.get("public_reasoning", "No public reasoning provided")
-                return NominationAction(player, self.name, private_reasoning, public_reasoning)
+                return NominationAction(player, self.name, private_reasoning, public_reasoning, thinking)
                 
             elif function_name == "slayer_power":
                 target = arguments.get("target", "")
                 private_reasoning = arguments.get("private_reasoning", "No private reasoning provided")
                 public_reasoning = arguments.get("public_reasoning", "No public reasoning provided")
                 self.used_once_per_game[DayActions.SLAYER_POWER] = True
-                return SlayerPowerAction(target, private_reasoning, public_reasoning)
+                return SlayerPowerAction(target, private_reasoning, public_reasoning, thinking)
                 
             elif function_name == "pass":
                 private_reasoning = arguments.get("private_reasoning", "No private reasoning provided")
-                return NoAction(private_reasoning)
+                return NoAction(private_reasoning, thinking)
         else:
             logger.error(f"{self.name} chose an invalid action: {response}")
                 
         # Default if no action was taken or there was an error
-        return NoAction("Did not choose a valid action")
+        return NoAction("Did not choose a valid action", thinking)
      
-    def night_player_choice(self, public_game_state: PublicGameState, prompt: str) -> tuple[list[str], str]:        
+    def night_player_choice(self, public_game_state: PublicGameState, prompt: str) -> tuple[list[str], str, str]:        
         user_message = "Use the night_choice tool to make your selection and provide your reasoning."
 
-        response = request_llm_response(
+        response: dict[str, Any] = request_llm_response(
             user_message=user_message,
             model=self.model,
             cached_system_prompt_strs=self._get_cached_system_prompt(public_game_state),
@@ -413,11 +427,14 @@ IMPORTANT: You do not need perfect information to vote YES on a nomination. Both
                 self._get_dynamic_system_prompt(public_game_state),
                 self._get_history_prompt()
             ],
-            tools=[get_night_choice_tool(prompt, [player['name'] for player in public_game_state.player_state])]
+            tools=[get_night_choice_tool(prompt, [player['name'] for player in public_game_state.player_state])],
+            thinking_token_budget=self.thinking_token_budget
         )
 
+        thinking = response.get("thinking", "")
+
         # Handle the response
-        if isinstance(response, dict) and "function_name" in response:
+        if "function_name" in response:
             function_name = response["function_name"]
             arguments = response.get("arguments", {})
             
@@ -428,7 +445,7 @@ IMPORTANT: You do not need perfect information to vote YES on a nomination. Both
                 if player_choice and isinstance(player_choice, list) and len(player_choice) > 0:
                     # Log the private reasoning for debugging/analysis
                     logger.info(f"{self.name} night choice reasoning: {private_reasoning}")
-                    return player_choice, private_reasoning
+                    return player_choice, private_reasoning, thinking
                 else:
                     logger.error(f"{self.name} provided empty or invalid player choice: {player_choice}")
             else:
@@ -437,5 +454,5 @@ IMPORTANT: You do not need perfect information to vote YES on a nomination. Both
             logger.error(f"{self.name} failed to use night choice tool: {response}")
 
         # Return empty list if there was an error
-        return [], ""
+        return [], "", thinking
         

@@ -5,7 +5,7 @@ def get_message_tool(player_names: list[str]) -> ToolParam:
     """Generate a message tool with the current list of player names as enum options."""
     return ToolParam(
         name="send_message",
-        description="Send a message to one or more players.",
+        description="Send a message to one or more players. Saying that you nominate someone will not actually nominate them, it will just send a message to the other players. You need to use the nominate tool to actually nominate someone.",
         input_schema={
             "type": "object",
             "properties": {
