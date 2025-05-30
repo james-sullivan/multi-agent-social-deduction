@@ -31,6 +31,7 @@ class EventType(Enum):
     MINION_INFO = "minion_info"
     STORYTELLER_INFO = "storyteller_info"
     DEATH_ANNOUNCEMENT = "death_announcement"
+    EARLY_DAY_END = "early_day_end"
     
     # Specific character power events
     WASHERWOMAN_POWER = "washerwoman_power"

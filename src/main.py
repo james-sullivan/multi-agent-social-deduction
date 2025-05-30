@@ -93,10 +93,10 @@ def create_game(config, debug=False):
         script=TROUBLE_BREWING,
         characters=characters,
         random_seed= 43,  # Use config seed or default to 42
-        #model=config.get("model", "claude-3-5-haiku-20241022"),
-        model="claude-sonnet-4-20250514",
+        model=config.get("model", "claude-3-5-haiku-20241022"),
+        #model="claude-sonnet-4-20250514",
         #model=config.get("model", "claude-opus-4-20250514"),
-        thinking_token_budget=1024
+        thinking_token_budget=0
     )
     return game
 

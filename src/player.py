@@ -368,7 +368,7 @@ IMPORTANT: You do not need perfect information to vote YES on a nomination. Both
         elif remaining_action_rounds == 0:
             rounds_info = " This is the final round of day actions before the day ends."
 
-        user_message = f"It is your turn to either take an action or pass. You must use one of the tools available to you.{rounds_info} Consider things like your notes, what team you are on, and what has happened so far. What do you want to do?"
+        user_message = f"It is your turn to either take an action or pass. You must use one of the tools available to you.{rounds_info} Consider things like your notes, what team you are on, what has happened so far, and how close the game is to ending. What do you want to do?"
         
         response: dict[str, Any] = request_llm_response(
             user_message=user_message,
