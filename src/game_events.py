@@ -32,7 +32,8 @@ class EventType(Enum):
     STORYTELLER_INFO = "storyteller_info"
     DEATH_ANNOUNCEMENT = "death_announcement"
     EARLY_DAY_END = "early_day_end"
-    
+    ERROR = "error"
+
     # Specific character power events
     WASHERWOMAN_POWER = "washerwoman_power"
     LIBRARIAN_POWER = "librarian_power"
@@ -166,7 +167,7 @@ class GameEventTracker:
             EventType.MINION_INFO: "\033[1;95m",      # Bright magenta
             EventType.STORYTELLER_INFO: "\033[1;97m", # Bright white
             EventType.DEATH_ANNOUNCEMENT: "\033[1;91m", # Bright red
-            
+            EventType.ERROR: "\033[1;31m", # Bold red
             # Specific character power colors (all use same color)
             EventType.WASHERWOMAN_POWER: "\033[1;35m",    # Bold magenta
             EventType.LIBRARIAN_POWER: "\033[1;35m",      # Bold magenta
@@ -218,6 +219,7 @@ class GameEventTracker:
             EventType.MINION_INFO: "🔥 MINION INFO",
             EventType.STORYTELLER_INFO: "🎭 STORYTELLER",
             EventType.DEATH_ANNOUNCEMENT: "☠️  DEATHS",
+            EventType.ERROR: "❌ ERROR",
             
             # Specific character power prefixes
             EventType.WASHERWOMAN_POWER: "🧺 WASHERWOMAN",

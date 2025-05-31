@@ -15,7 +15,7 @@ def get_message_tool(player_names: list[str]) -> ToolParam:
                         "type": "string",
                         "enum": player_names
                     },
-                    "description": "The players you want to send the message to. IMPORTANT: GHOST PLAYERS ARE STILL PLAYING THE GAME, THEY CAN STILL RECEIVE MESSAGES AND PLAY AN IMPORTANT ROLE IN THE GAME. DO NOT EXCLUDE GHOST PLAYERS JUST BECAUSE THEY ARE GHOSTS."
+                    "description": "An array of players (or player) you want to send the message to. IMPORTANT: GHOST PLAYERS ARE STILL PLAYING THE GAME, THEY CAN STILL RECEIVE MESSAGES AND PLAY AN IMPORTANT ROLE IN THE GAME. DO NOT EXCLUDE GHOST PLAYERS JUST BECAUSE THEY ARE GHOSTS."
                 },
                 "message": {
                     "type": "string",
@@ -89,7 +89,7 @@ def get_nomination_tool(nominatable_players: list[str]) -> ToolParam:
                 "player": {
                     "type": "string",
                     "enum": nominatable_players,
-                    "description": "The name of the player to nominate for execution."
+                    "description": "The name of the player to nominate for execution. This should only be one of the players that are still nominatable today which are listed in the enum"
                 },
                 "private_reasoning": {
                     "type": "string",

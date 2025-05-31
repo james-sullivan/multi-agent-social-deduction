@@ -65,17 +65,43 @@ def load_config(config_name="default"):
 
 def create_game(config, debug=False):
     '''
+    # 10-player games
+    characters = [
+        Demon.IMP,
+        Minion.SPY,
+        Minion.BARON,
+        Townsfolk.LIBRARIAN,
+        Townsfolk.FORTUNETELLER,
+        Townsfolk.UNDERTAKER,
+        Townsfolk.MAYOR,
+        Townsfolk.CHEF,
+        Outsider.SAINT,
+        Outsider.DRUNK,
+    ]
+
     characters = [
         Demon.IMP,
         Minion.POISONER,
-        Minion.SPY,
-        Townsfolk.INVESTIGATOR,
+        Minion.SCARLET_WOMAN,
         Townsfolk.SLAYER,
-        Townsfolk.FORTUNETELLER,
-        Townsfolk.LIBRARIAN,
-        Townsfolk.VIRGIN,
+        Townsfolk.MONK,
         Townsfolk.UNDERTAKER,
-        Outsider.DRUNK
+        Townsfolk.MAYOR,
+        Townsfolk.VIRGIN,
+        Townsfolk.MONK,
+        Townsfolk.WASHERWOMAN
+    ]
+
+    # 8-player games
+    characters = [
+        Demon.IMP,
+        Minion.POISONER,
+        Townsfolk.INVESTIGATOR,
+        Townsfolk.MONK,
+        Townsfolk.WASHERWOMAN,
+        Townsfolk.UNDERTAKER,
+        Townsfolk.RAVENKEEPER,
+        Outsider.DRUNK,
     ]
 
     characters = [
@@ -84,11 +110,12 @@ def create_game(config, debug=False):
         Townsfolk.SLAYER,
         Townsfolk.EMPATH,
         Townsfolk.FORTUNETELLER,
+        Townsfolk.MAYOR,
+        Townsfolk.VIRGIN,
         Outsider.RECLUSE,
-        
     ]
-    '''
 
+    # 6-player games
     characters = [
         Demon.IMP,
         Minion.POISONER,
@@ -98,15 +125,54 @@ def create_game(config, debug=False):
         Outsider.DRUNK,
     ]
 
+    characters = [
+        Demon.IMP,
+        Minion.SPY,
+        Townsfolk.UNDERTAKER,
+        Townsfolk.MAYOR,
+        Townsfolk.INVESTIGATOR,
+        Outsider.RECLUSE,
+    ]
+    '''
+
+    characters = [
+        Demon.IMP,
+        Minion.SCARLET_WOMAN,
+        Townsfolk.INVESTIGATOR,
+        Townsfolk.MONK,
+        Townsfolk.WASHERWOMAN,
+        Townsfolk.UNDERTAKER,
+        Townsfolk.RAVENKEEPER,
+        Outsider.DRUNK,
+    ]
+
+    outsider_count = sum(1 for char in characters if isinstance(char, Outsider))
+    townsfolk_count = sum(1 for char in characters if isinstance(char, Townsfolk))
+    minion_count = sum(1 for char in characters if isinstance(char, Minion))
+
+    if Minion.BARON in characters:
+        outsider_count -= 2
+        townsfolk_count += 2
+
+    model = "claude-3-5-haiku-20241022"
+    #model = "claude-sonnet-4-20250514"
+    #model = "claude-opus-4-20250514"
+
+    if "haiku" in model:
+        thinking_token_budget = 0
+    else:
+        thinking_token_budget = 1024
+
     # Create game with hardcoded characters
     game = Game(
         script=TROUBLE_BREWING,
         characters=characters,
+        outsider_count=outsider_count,
+        townsfolk_count=townsfolk_count,
+        minion_count=minion_count,
         random_seed= 43,  # Use config seed or default to 42
-        model=config.get("model", "claude-3-5-haiku-20241022"),
-        #model="claude-sonnet-4-20250514",
-        #model=config.get("model", "claude-opus-4-20250514"),
-        thinking_token_budget=0
+        model=model,
+        thinking_token_budget=thinking_token_budget
     )
     return game
 

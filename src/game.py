@@ -34,14 +34,14 @@ class PublicGameState:
 class Game:
     def __init__(self, 
                  script: Script, 
-                 characters: list[Character] | None = None, 
+                 characters: list[Character], 
                  outsider_count: int = 0, 
                  townsfolk_count: int = 0, 
                  minion_count: int = 0, 
                  random_seed: int | None = None,
                  model: str = "claude-3-5-haiku-20241022",
                  thinking_token_budget: int = 0):
-        assert characters is not None or (sum([outsider_count, townsfolk_count, minion_count]) >= 4), \
+        assert len(characters) >= 5 and (sum([outsider_count, townsfolk_count, minion_count]) >= 4), \
         "Must provide at least 5 characters or specify counts for each role"
 
         names = ["Susan", "John", "Emma", "Michael", "Olivia", "James", "Sophia", "William", "Erick", \
@@ -62,33 +62,9 @@ class Game:
         
         self._players: list[Player] = []
 
-        if characters:
-            for character in characters:
-                alignment = self._get_character_alignment(character)
-                self._players.append(Player(name=names.pop(), alignment=alignment, character=character, model=model, thinking_token_budget=thinking_token_budget))
-        else:
-            demon_char = demons.pop()
-            alignment = self._get_character_alignment(demon_char)
-            self._players.append(Player(name=names.pop(), alignment=alignment, character=demon_char, model=model, thinking_token_budget=thinking_token_budget))
-
-            for _ in range(minion_count):
-                minion_char = minions.pop()
-                alignment = self._get_character_alignment(minion_char)
-                self._players.append(Player(name=names.pop(), alignment=alignment, character=minion_char, model=model, thinking_token_budget=thinking_token_budget))
-                if self._players[-1].character == Minion.BARON:
-                    outsider_count += 2
-                    townsfolk_count = max(townsfolk_count - 2, 0)
-
-            for _ in range(outsider_count):
-                outsider_char = outsiders.pop()
-                alignment = self._get_character_alignment(outsider_char)
-                player = Player(name=names.pop(), alignment=alignment, character=outsider_char, model=model, thinking_token_budget=thinking_token_budget)
-                self._players.append(player)
-
-            for _ in range(townsfolk_count):
-                townsfolk_char = townsfolk.pop()
-                alignment = self._get_character_alignment(townsfolk_char)
-                self._players.append(Player(name=names.pop(), alignment=alignment, character=townsfolk_char, model=model, thinking_token_budget=thinking_token_budget))
+        for character in characters:
+            alignment = self._get_character_alignment(character)
+            self._players.append(Player(name=names.pop(), alignment=alignment, character=character, model=model, thinking_token_budget=thinking_token_budget))
 
         random.shuffle(self._players)
 
@@ -106,23 +82,12 @@ class Game:
         self._script: Script = script
         self._model: str = model
         
-        # Store original role counts (before Baron modifications)
-        if characters:
-            # Count actual roles when characters are provided
-            self._original_role_counts = {
-                "townsfolk": sum(1 for char in characters if isinstance(char, Townsfolk)),
-                "outsider": sum(1 for char in characters if isinstance(char, Outsider)),
-                "minion": sum(1 for char in characters if isinstance(char, Minion)),
-                "demon": sum(1 for char in characters if isinstance(char, Demon))
-            }
-        else:
-            # Use the provided counts (before Baron modifications)
-            self._original_role_counts = {
-                "townsfolk": townsfolk_count,
-                "outsider": outsider_count,
-                "minion": minion_count,
-                "demon": 1  # Always exactly 1 demon
-            }
+        self._original_role_counts = {
+            "townsfolk": townsfolk_count,
+            "outsider": outsider_count,
+            "minion": minion_count,
+            "demon": 1  # Always exactly 1 demon
+        }
         
         # Initialize event tracker
         self.event_tracker = GameEventTracker()
@@ -137,68 +102,51 @@ class Game:
             good_players = [player for player in self._players if (player.alignment == Alignment.GOOD)]
             self._reminder_tokens[Townsfolk.FORTUNETELLER] = {ReminderTokens.RED_HERRING: random.choice(good_players)}
 
-        # Track used players to avoid overlapping reminder tokens
-        used_reminder_players = set()
-
         # Investigator setup
         if Townsfolk.INVESTIGATOR in self._character_dict:
             minion_players = [player for player in self._players if Minion in self._get_player_roles(player)]
-            # Filter out the Spy if we can
             minion_players = [player for player in minion_players if player.character != Minion.SPY] if len(minion_players) > 1 else minion_players
-            non_minion_players = [player for player in self._players if not isinstance(player.character, Minion)]
-            
+
             investigator_minion = random.choice(minion_players)
+
+            non_minion_players = [player for player in self._players if not isinstance(player.character, Minion) and player is not investigator_minion]
+            
             investigator_other = random.choice(non_minion_players)
             
             self._reminder_tokens[Townsfolk.INVESTIGATOR] = {
                 ReminderTokens.INVESTIGATOR_MINION: investigator_minion,
                 ReminderTokens.INVESTIGATOR_OTHER: investigator_other
             }
-            
-            used_reminder_players.add(investigator_minion)
-            used_reminder_players.add(investigator_other)
 
         # Washerwoman setup
         if Townsfolk.WASHERWOMAN in self._character_dict:
             townsfolk_players = [player for player in self._players if Townsfolk in self._get_player_roles(player)]
-            non_townsfolk_players = [player for player in self._players if not isinstance(player.character, Townsfolk)]
+
+            washerwoman_townsfolk = random.choice(townsfolk_players)
+
+            non_townsfolk_players = [player for player in self._players if not isinstance(player.character, Townsfolk) and player is not washerwoman_townsfolk]
             
-            # Try to avoid overlap with other reminder tokens
-            available_townsfolk = [p for p in townsfolk_players if p not in used_reminder_players]
-            available_non_townsfolk = [p for p in non_townsfolk_players if p not in used_reminder_players]
-            
-            # If we can avoid overlap, do so; otherwise fall back to any valid choice
-            washerwoman_townsfolk = random.choice(available_townsfolk if available_townsfolk else townsfolk_players)
-            washerwoman_other = random.choice(available_non_townsfolk if available_non_townsfolk else non_townsfolk_players)
+            washerwoman_other = random.choice(non_townsfolk_players if non_townsfolk_players else non_townsfolk_players)
             
             self._reminder_tokens[Townsfolk.WASHERWOMAN] = {
                 ReminderTokens.WASHERWOMAN_TOWNSFOLK: washerwoman_townsfolk,
                 ReminderTokens.WASHERWOMAN_OTHER: washerwoman_other
             }
-            
-            used_reminder_players.add(washerwoman_townsfolk)
-            used_reminder_players.add(washerwoman_other)
-
+              
         # Librarian setup
         if Townsfolk.LIBRARIAN in self._character_dict:
             outsider_players = [player for player in self._players if Outsider in self._get_player_roles(player)]
-            non_outsider_players = [player for player in self._players if not isinstance(player.character, Outsider)]
             if outsider_players:
-                # Try to avoid overlap with other reminder tokens
-                available_outsiders = [p for p in outsider_players if p not in used_reminder_players]
-                available_non_outsiders = [p for p in non_outsider_players if p not in used_reminder_players]
+                librarian_outsider = random.choice(outsider_players)
+
+                available_non_outsiders = [player for player in self._players if not isinstance(player.character, Outsider) and player is not librarian_outsider]
                 
-                # If we can avoid overlap, do so; otherwise fall back to any valid choice
-                librarian_outsider = random.choice(available_outsiders if available_outsiders else outsider_players)
-                librarian_other = random.choice(available_non_outsiders if available_non_outsiders else non_outsider_players)
+                librarian_other = random.choice(available_non_outsiders)
                 
                 self._reminder_tokens[Townsfolk.LIBRARIAN] = {
                     ReminderTokens.LIBRARIAN_OUTSIDER: librarian_outsider,
                     ReminderTokens.LIBRARIAN_OTHER: librarian_other
                 }
-                
-                used_reminder_players.add(librarian_outsider)
-                used_reminder_players.add(librarian_other)
             # If no outsiders, don't set any tokens - the power will handle this case
 
         # Track that setup is complete
@@ -214,7 +162,8 @@ class Game:
                 "players": [p.name for p in self._players],
                 "script": self._script.__class__.__name__,
                 "model": self._model,
-                "thinking_token_budget": thinking_token_budget
+                "thinking_token_budget": thinking_token_budget,
+                "random_seed": random_seed
             }
         )
 
@@ -242,6 +191,16 @@ class Game:
             return {Minion, Demon}
         
         return {type(player.character)}
+    
+    def _get_player_character(self, player: Player) -> Character:
+        if player.character == Minion.SPY:
+            in_play_chars = [char for char in self._character_dict.keys() if char in {Townsfolk, Outsider}]
+            return random.choice(in_play_chars)
+        elif player.character == Outsider.RECLUSE:
+            in_play_chars = [char for char in self._character_dict.keys() if char in {Minion, Demon}]
+            return random.choice(in_play_chars)
+        
+        return player.character
 
     def _get_public_game_state(self) -> PublicGameState:
         """
@@ -551,7 +510,13 @@ class Game:
             # Get the players from reminder tokens (these should exist for a real Washerwoman)
             townsfolk_player = self._reminder_tokens[Townsfolk.WASHERWOMAN][ReminderTokens.WASHERWOMAN_TOWNSFOLK]
             other_player = self._reminder_tokens[Townsfolk.WASHERWOMAN][ReminderTokens.WASHERWOMAN_OTHER]
-            townsfolk_character = townsfolk_player.character
+            # Check if this is the spy
+            if not isinstance(townsfolk_player.character, Townsfolk):
+                # We need to make up a townsfolk character
+                not_in_play_townsfolk = [char for char in self._script.townsfolk if char not in self._character_dict]
+                townsfolk_character = random.choice(not_in_play_townsfolk)
+            else:
+                townsfolk_character = townsfolk_player.character
             
         info_msg = f"One of these players is the {townsfolk_character.value}: {townsfolk_player.name}, {other_player.name}"
         self._broadcast_info("Storyteller", player, info_msg, EventType.WASHERWOMAN_POWER, 
@@ -581,7 +546,13 @@ class Game:
             # Get the players from reminder tokens
             outsider_player = self._reminder_tokens[Townsfolk.LIBRARIAN][ReminderTokens.LIBRARIAN_OUTSIDER]
             other_player = self._reminder_tokens[Townsfolk.LIBRARIAN][ReminderTokens.LIBRARIAN_OTHER]
-            outsider_character = outsider_player.character
+            # Check if this is the spy
+            if not isinstance(outsider_player.character, Outsider):
+                # We need to make up an outsider character
+                not_in_play_outsider = [char for char in self._script.outsiders if char not in self._character_dict]
+                outsider_character = random.choice(not_in_play_outsider)
+            else:
+                outsider_character = outsider_player.character
             
         info_msg = f"One of these players is the {outsider_character.value}: {outsider_player.name}, {other_player.name}"
         self._broadcast_info("Storyteller", player, info_msg, EventType.LIBRARIAN_POWER,
@@ -603,7 +574,13 @@ class Game:
             # Get the players from reminder tokens
             minion_player = self._reminder_tokens[Townsfolk.INVESTIGATOR][ReminderTokens.INVESTIGATOR_MINION]
             other_player = self._reminder_tokens[Townsfolk.INVESTIGATOR][ReminderTokens.INVESTIGATOR_OTHER]
-            minion_character = minion_player.character
+            # Check if this is the recluse
+            if not isinstance(minion_player.character, Minion):
+                # We need to make up a minion character
+                not_in_play_minion = [char for char in self._script.minions if char not in self._character_dict]
+                minion_character = random.choice(not_in_play_minion)
+            else:
+                minion_character = minion_player.character
             
         info_msg = f"One of these players is the {minion_character.value}: {minion_player.name}, {other_player.name}"
         self._broadcast_info("Storyteller", player, info_msg, EventType.INVESTIGATOR_POWER,
@@ -760,7 +737,7 @@ class Game:
         
         # Active reminder tokens
         if self._reminder_tokens:
-            grimoire_info.append("\n=== ACTIVE REMINDER TOKENS ===\nThese tokens are used to track information about players such who the Fortuneteller's Red Herring is.")
+            grimoire_info.append("\n=== ACTIVE REMINDER TOKENS ===\nThese tokens are used to track information about players such as who the Fortuneteller's Red Herring is.")
             for character, tokens in self._reminder_tokens.items():
                 for token, target_player in tokens.items():
                     if target_player:
@@ -872,7 +849,7 @@ class Game:
                 raise ValueError("Ravenkeeper must choose exactly 1 player")
             
             choice: Player = self._player_dict[player_choice[0]]
-            learned_character = choice.character
+            learned_character = self._get_player_character(choice)
             
             # If the Ravenkeeper was drunk or poisoned when they died, give false information
             if self._is_drunk_or_poisoned(player):
@@ -906,7 +883,7 @@ class Game:
             return
         
         executed_player = self._reminder_tokens[Townsfolk.UNDERTAKER][ReminderTokens.UNDERTAKER_EXECUTED]
-        learned_character = executed_player.character
+        learned_character = self._get_player_character(executed_player)
         
         # If the Undertaker is drunk or poisoned, give false information
         if self._is_drunk_or_poisoned(player):
@@ -978,6 +955,7 @@ class Game:
             (Townsfolk.MONK, ReminderTokens.MONK_PROTECTED),
             (Demon.IMP, ReminderTokens.IMP_KILLED),
             (Outsider.BUTLER, ReminderTokens.BUTLER_MASTER),
+            (Townsfolk.RAVENKEEPER, ReminderTokens.RAVENKEEPER_WOKEN),
         ]
         
         for character, token in tokens_to_clear:
@@ -1372,7 +1350,7 @@ class Game:
         loops = 4
         consecutive_passes = 0
         for i in range(loops):
-            if i == 1:  # Open nominations on the second iteration
+            if i == 2:  # Open nominations on the third iteration
                 self._nominations_open = True
                 self._broadcast_info("Storyteller", self._all_players(), "Nominations are now open.", EventType.NOMINATIONS_OPEN)
         
@@ -1387,51 +1365,79 @@ class Game:
                 if self._should_end_day_early(consecutive_passes):
                     end_day_early = True
                     break
+                
+                remaining_retries = 2
+                finsihed_action = False
+                # We sometimes get invalid action parameters, so we retry a few times if that happens
+                while not finsihed_action and remaining_retries > 0:
+                    action: DayAction | None = player.day_action(self._get_public_game_state(), self._nominations_open, remaining_rounds)
 
-                action: DayAction | None = player.day_action(self._get_public_game_state(), self._nominations_open, remaining_rounds)
+                    if isinstance(action, NoAction):
+                        consecutive_passes += 1
+                    else:
+                        consecutive_passes = 0
 
-                if isinstance(action, NoAction):
-                    consecutive_passes += 1
-                else:
-                    consecutive_passes = 0
-
-                if isinstance(action, MessageAction):
-                    self._broadcast_info(
-                        player.name, 
-                        action.recipients, 
-                        action.message, 
-                        EventType.MESSAGE,
-                        metadata={
-                            "sender": player.name,
-                            "recipients": action.recipients,
-                            "message": action.message,
-                            "thinking": action.thinking
-                        },
-                        include_sender_in_history=True
-                    )
-                elif isinstance(action, NominationAction):
-                    # Valid nomination - process it
-                    if self._run_nomination(player, action):
-                        return None  # End the day if someone died from the Virgin's power
-                elif isinstance(action, SlayerPowerAction):
-                    # Dead players cannot use abilities (but this should be handled by the Player class)
-                    if self._slayer_power(player, action):
-                        game_over = self._game_over()
-                        if game_over:
-                            return game_over
-                elif isinstance(action, NoAction):
-                    # Send private confirmation to the player who passed
-                    self._broadcast_info(
-                        "Storyteller", 
-                        player, 
-                        f"You passed your turn. Your reasoning: {action.private_reasoning}",
-                        EventType.PLAYER_PASS,
-                        metadata={
-                            "player_name": player.name,
-                            "private_reasoning": action.private_reasoning,
-                            "thinking": action.thinking
-                        }
-                    )
+                    try:
+                        if isinstance(action, MessageAction):
+                            # Validate recipients
+                            for recipient in action.recipients:
+                                if recipient not in self._player_dict:
+                                    raise Exception(f"Invalid recipient: {recipient} - not found in player dictionary. action.recipients: {action.recipients}")
+                            self._broadcast_info(
+                                player.name, 
+                                action.recipients, 
+                                action.message, 
+                                EventType.MESSAGE,
+                                metadata={
+                                    "sender": player.name,
+                                    "recipients": action.recipients,
+                                    "message": action.message,
+                                    "thinking": action.thinking
+                                },
+                                include_sender_in_history=True
+                            )
+                        elif isinstance(action, NominationAction):
+                            # Validate nominee
+                            if action.nominee not in self._player_dict:
+                                raise Exception(f"Invalid nominee: {action.nominee} - not found in player dictionary.")
+                            # Valid nomination - process it
+                            if self._run_nomination(player, action):
+                                return None  # End the day if someone died from the Virgin's power
+                        elif isinstance(action, SlayerPowerAction):
+                            # Validate target
+                            if action.target not in self._player_dict:
+                                raise Exception(f"Invalid Slayer target: {action.target} - not found in player dictionary.")
+                            # Dead players cannot use abilities (but this should be handled by the Player class)
+                            if self._slayer_power(player, action):
+                                game_over = self._game_over()
+                                if game_over:
+                                    return game_over
+                        elif isinstance(action, NoAction):
+                            # Send private confirmation to the player who passed
+                            self._broadcast_info(
+                                "Storyteller", 
+                                player, 
+                                f"You passed your turn. Your reasoning: {action.private_reasoning}",
+                                EventType.PLAYER_PASS,
+                                metadata={
+                                    "player_name": player.name,
+                                    "private_reasoning": action.private_reasoning,
+                                    "thinking": action.thinking
+                                }
+                            )
+                    except Exception as e:
+                        logger.error(f"Error in day action: remaining_retries: {remaining_retries}, {e}")
+                        remaining_retries -= 1
+                        self.event_tracker.add_event(
+                            event_type=EventType.ERROR,
+                            description=f"Error in day action: {e}",
+                            round_number=self._round_number,
+                            phase=self._current_phase.value,
+                            participants=[player.name],
+                        )
+                        return None
+                    else:
+                        finsihed_action = True
 
             if end_day_early:
                 break
