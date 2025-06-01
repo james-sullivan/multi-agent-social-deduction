@@ -1,7 +1,14 @@
 # from roles import Townsfolk, Outsider, Minion, Demon, Role
-from enum import Enum
+from enum import Enum, auto
 import random
-from game_enums import Alignment
+import sys
+
+# Use different import paths depending on how the file is being run
+try:
+    from game_enums import Alignment
+except ModuleNotFoundError:
+    # Fall back to prefixed import when run from outside src directory
+    from src.game_enums import Alignment
 
 class ReminderTokens(Enum):
     RED_HERRING = "Fortuneteller_Red_Herring"

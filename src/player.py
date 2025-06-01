@@ -1,20 +1,32 @@
 from __future__ import annotations
-from game_enums import Alignment, Vote
-from characters import Character
-from typing import Optional, List, TYPE_CHECKING, Any
+import sys
 import logging
+import json
+from enum import Enum
+from dataclasses import dataclass
+import re
+import random
+from typing import Optional, List, TYPE_CHECKING, Any
+
+# Use different import paths depending on how the file is being run
+try:
+    from game_enums import Alignment, Vote
+    from characters import Character
+    from prompts import BOTC_RULES
+    from scripts import TROUBLE_BREWING_CHARACTERS
+    from player_tools import get_message_tool, get_slayer_tool, PASS_TOOL, VOTE_TOOL, get_nomination_tool, get_night_choice_tool
+    from inference import request_llm_response, get_cost_tracker
+except ModuleNotFoundError:
+    # Fall back to prefixed imports when run from outside src directory
+    from src.game_enums import Alignment, Vote
+    from src.characters import Character
+    from src.prompts import BOTC_RULES
+    from src.scripts import TROUBLE_BREWING_CHARACTERS
+    from src.player_tools import get_message_tool, get_slayer_tool, PASS_TOOL, VOTE_TOOL, get_nomination_tool, get_night_choice_tool
+    from src.inference import request_llm_response, get_cost_tracker
 
 if TYPE_CHECKING:
     from game import PublicGameState
-import json
-from anthropic.types import ToolParam
-from player_tools import get_message_tool, get_slayer_tool, PASS_TOOL, VOTE_TOOL, get_nomination_tool, get_night_choice_tool
-from enum import Enum
-from prompts import BOTC_RULES
-from scripts import TROUBLE_BREWING_CHARACTERS
-from dataclasses import dataclass
-from inference import request_llm_response
-import re
 
 logger = logging.getLogger(__name__)
 
@@ -202,7 +214,7 @@ You have {"not" if self.used_nomination else ""} nominated today.
         """Summarize the player's history into their notes using AI."""
         
         # Use prefix caching for better performance (no redundancy)
-        user_message = "It's time to update your notes. This first half of your notes should be a summary of your history. After this update your history will be cleared so make sure that all of the important information is included in your notes. The second half of your notes should be five bullet points of actionable strategy advice that you want to follow to help your team win. If there are already five bullet points, update them based on the new information. Only give me your updated notes, no other text and use bullet points. You only need to note information that is not in the rest of your system prompt. Do not make this longer than 20 lines."
+        user_message = "It's time to update your notes. This first half of your notes should be a summary of your history. After this update your history will be cleared so make sure that all of the important information is included in your notes. The second half of your notes should be five bullet points of actionable strategy advice that you want to follow to help your team win. If there are already five bullet points, update them based on the new information. Only give me your updated notes, no other text and use bullet points. You only need to note information that is not in the rest of your system prompt. Do not make this longer than 30 lines."
         
         response: dict[str, Any] = request_llm_response(
             user_message=user_message,
@@ -338,7 +350,7 @@ IMPORTANT: You do not need perfect information to vote YES on a nomination. Both
         logger.error(f"{self.name} failed to use voting tool properly: {response}")
         return Vote.NO, "Failed to vote properly", "Failed to vote properly", thinking
 
-    def day_action(self, public_game_state: PublicGameState, nominations_open: bool = False, remaining_action_rounds: int = 0) -> Optional[DayAction]:
+    def day_action(self, public_game_state: PublicGameState, nominations_open: bool = False, remaining_action_rounds: int = 0, execption: Exception | None = None) -> Optional[DayAction]:
         available_tools: List[ToolParam] = []
 
         if nominations_open and not self.used_nomination and self.alive:
@@ -368,7 +380,11 @@ IMPORTANT: You do not need perfect information to vote YES on a nomination. Both
         elif remaining_action_rounds == 0:
             rounds_info = " This is the final round of day actions before the day ends."
 
-        user_message = f"It is your turn to either take an action or pass. You must use one of the tools available to you.{rounds_info} Consider things like your notes, what team you are on, what has happened so far, and how close the game is to ending. What do you want to do?"
+        execption_info = ""
+        if execption:
+            execption_info = f" There was an error in the your previous action. Here was the error, do not repeat it: {execption}"
+
+        user_message = f"It is your turn to either take an action or pass. You must use one of the tools available to you.{rounds_info} Consider things like your notes, what team you are on, what has happened so far, and how close the game is to ending. What do you want to do?{execption_info}"
         
         response: dict[str, Any] = request_llm_response(
             user_message=user_message,

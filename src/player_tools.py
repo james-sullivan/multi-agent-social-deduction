@@ -82,14 +82,14 @@ def get_nomination_tool(nominatable_players: list[str]) -> ToolParam:
     """Generate a nomination tool with the current list of nominatable players."""
     return ToolParam(
         name="nominate",
-        description="Nominate a player for execution. This will start a vote to execute the nominated player. You can only nominate once per day and each player can only be nominated once per day. You must provide both private reasoning (for your own strategic thinking) and public reasoning (what others will hear).",
+        description=f"Nominate one player from this list {nominatable_players}. This will start a vote to execute the nominated player. You can only nominate once per day and each player can only be nominated once per day.",
         input_schema={
             "type": "object",
             "properties": {
                 "player": {
                     "type": "string",
                     "enum": nominatable_players,
-                    "description": "The name of the player to nominate for execution. This should only be one of the players that are still nominatable today which are listed in the enum"
+                    "description": f"The name of the player to nominate for execution. Must be one of {nominatable_players}"
                 },
                 "private_reasoning": {
                     "type": "string",

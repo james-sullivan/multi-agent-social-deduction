@@ -3,16 +3,37 @@ import logging
 from dataclasses import dataclass
 from collections import defaultdict
 from typing import Any
+from datetime import datetime
+from pathlib import Path
+import pickle
+import base64
+import json
+import copy
+import sys
 
-from player import DayAction, MessageAction, NominationAction, SlayerPowerAction, VoteAction, NoAction, Player
-from characters import Character, Townsfolk, Outsider, Demon, Minion
-from utils import format_vote_history
-from scripts import Script
-from prompts import POISONER_PROMPT, FORTUNETELLER_PROMPT, MONK_PROMPT, RAVENKEEPER_PROMPT, IMP_PROMPT, BUTLER_PROMPT
-from characters import ReminderTokens
-from game_events import GameEventTracker, EventType
-from game_enums import Vote, Alignment, Phase
-from inference import get_cost_tracker
+# Use different import paths depending on how the file is being run
+try:
+    from player import DayAction, MessageAction, NominationAction, SlayerPowerAction, VoteAction, NoAction, Player
+    from characters import Character, Townsfolk, Outsider, Demon, Minion
+    from utils import format_vote_history
+    from scripts import Script
+    from prompts import POISONER_PROMPT, FORTUNETELLER_PROMPT, MONK_PROMPT, RAVENKEEPER_PROMPT, IMP_PROMPT, BUTLER_PROMPT
+    from characters import ReminderTokens
+    from game_events import GameEventTracker, EventType
+    from game_enums import Vote, Alignment, Phase
+    from inference import get_cost_tracker
+except ModuleNotFoundError:
+    # Fall back to prefixed imports when run from outside src directory
+    from src.player import DayAction, MessageAction, NominationAction, SlayerPowerAction, VoteAction, NoAction, Player
+    from src.characters import Character, Townsfolk, Outsider, Demon, Minion
+    from src.utils import format_vote_history
+    from src.scripts import Script
+    from src.prompts import POISONER_PROMPT, FORTUNETELLER_PROMPT, MONK_PROMPT, RAVENKEEPER_PROMPT, IMP_PROMPT, BUTLER_PROMPT
+    from src.characters import ReminderTokens
+    from src.game_events import GameEventTracker, EventType
+    from src.game_enums import Vote, Alignment, Phase
+    from src.inference import get_cost_tracker
+
 logger = logging.getLogger(__name__)
 
 @dataclass
@@ -120,7 +141,7 @@ class Game:
 
         # Washerwoman setup
         if Townsfolk.WASHERWOMAN in self._character_dict:
-            townsfolk_players = [player for player in self._players if Townsfolk in self._get_player_roles(player)]
+            townsfolk_players = [player for player in self._players if Townsfolk in self._get_player_roles(player) and player is not self._character_dict[Townsfolk.WASHERWOMAN]]
 
             washerwoman_townsfolk = random.choice(townsfolk_players)
 
@@ -194,12 +215,17 @@ class Game:
     
     def _get_player_character(self, player: Player) -> Character:
         if player.character == Minion.SPY:
-            in_play_chars = [char for char in self._character_dict.keys() if char in {Townsfolk, Outsider}]
-            return random.choice(in_play_chars)
+            # Spy pretends to be a townsfolk or outsider in play
+            in_play_chars = [char for char in self._character_dict.keys() if isinstance(char, (Townsfolk, Outsider))]
+            if in_play_chars:
+                return random.choice(in_play_chars)
         elif player.character == Outsider.RECLUSE:
-            in_play_chars = [char for char in self._character_dict.keys() if char in {Minion, Demon}]
-            return random.choice(in_play_chars)
-        
+            # Recluse pretends to be a minion or demon in play
+            in_play_chars = [char for char in self._character_dict.keys() if isinstance(char, (Minion, Demon))]
+            if in_play_chars:
+                return random.choice(in_play_chars)
+         
+        # Default: return the player's true character
         return player.character
 
     def _get_public_game_state(self) -> PublicGameState:
@@ -345,6 +371,9 @@ class Game:
         
         # If the Ravenkeeper is killed by a demon, mark them to be woken during the next night
         if player.character == Townsfolk.RAVENKEEPER and killed_by_demon:
+            # Initialize the Ravenkeeper's token dictionary if it doesn't exist
+            if Townsfolk.RAVENKEEPER not in self._reminder_tokens:
+                self._reminder_tokens[Townsfolk.RAVENKEEPER] = {}
             self._reminder_tokens[Townsfolk.RAVENKEEPER][ReminderTokens.RAVENKEEPER_WOKEN] = player
         
         self._scarlet_woman_check(player)
@@ -633,89 +662,72 @@ class Game:
                             metadata={"player_name": player.name, "evil_count": evil_count, "neighbors": [left.name, right.name]})
 
     def _fortuneteller_power(self, player: Player, night_start_game_state: PublicGameState) -> None:
-        player_choice, reasoning, thinking = player.night_player_choice(night_start_game_state, FORTUNETELLER_PROMPT)
+        player_choice, reasoning, thinking = self._get_night_player_choice_with_retries(player, night_start_game_state, FORTUNETELLER_PROMPT, EventType.FORTUNETELLER_POWER, 2)
         
-        try:
-            if len(player_choice) != 2:
-                raise ValueError("Fortuneteller must choose exactly 2 players")
-            
-            choice1: Player = self._player_dict[player_choice[0]]
-            choice2: Player = self._player_dict[player_choice[1]]
-            
-            # Check if this is a drunk or poisoned player
-            if (self._is_drunk_or_poisoned(player) or 
-                Townsfolk.FORTUNETELLER not in self._reminder_tokens or 
-                ReminderTokens.RED_HERRING not in self._reminder_tokens[Townsfolk.FORTUNETELLER]):
-                either_is_demon_or_red_herring = (Demon in {choice1.character, choice2.character})
-                # The opposite of whatever the truth is
-                either_is_demon_or_red_herring = not either_is_demon_or_red_herring
-            else:
-                # Get the red herring player
-                red_herring = self._reminder_tokens[Townsfolk.FORTUNETELLER][ReminderTokens.RED_HERRING]
-                
-                # Check if either chosen player is a Demon or the red herring
-                either_is_demon_or_red_herring = (
-                    Demon in self._get_player_roles(choice1) or choice1 is red_herring or
-                    Demon in self._get_player_roles(choice2) or choice2 is red_herring
-                )
-            
-            if either_is_demon_or_red_herring:
-                info_msg = f"Yes, one of {choice1.name} and {choice2.name} is the Demon. Your reasoning: {reasoning}"
-                self._broadcast_info("Storyteller", player, info_msg, EventType.FORTUNETELLER_POWER,
-                                    metadata={
-                                        "player_name": player.name,
-                                        "choices": [choice1.name, choice2.name],
-                                        "result": "yes",
-                                        "private_reasoning": reasoning,
-                                        "thinking": thinking
-                                    })
-            else:
-                info_msg = f"No, neither {choice1.name} nor {choice2.name} is the Demon. Your reasoning: {reasoning}"
-                self._broadcast_info("Storyteller", player, info_msg, EventType.FORTUNETELLER_POWER,
-                                    metadata={
-                                        "player_name": player.name,
-                                        "choices": [choice1.name, choice2.name],
-                                        "result": "no",
-                                        "private_reasoning": reasoning,
-                                        "thinking": thinking
-                                    })
-        except KeyError:
-            logger.error(f"Player {player.name} tried to choose {player_choice} but one of them is not in the game.")
-        except ValueError as e:
-            logger.error(f"Player {player.name} made invalid choice for Fortuneteller: {player_choice}. {str(e)}")
-    
-    def _poisoner_power(self, player: Player, night_start_game_state: PublicGameState) -> None:
-        player_choice, reasoning, thinking = player.night_player_choice(night_start_game_state, POISONER_PROMPT)
+        if not player_choice or len(player_choice) != 2:
+            # If validation failed, inform the player
+            if not player_choice:
+                self._broadcast_info("Storyteller", player, f"You must choose exactly 2 players. Your reasoning: {reasoning}")
+            return
         
-        try:
-            if not player_choice or len(player_choice) != 1:
-                if not player_choice:
-                    self._broadcast_info("Storyteller", player, f"You chose no one to poison tonight. Your reasoning: {reasoning}")
-                    logger.info(f"Player {player.name} (Poisoner) chose no one to poison")
-                else:
-                    self._broadcast_info("Storyteller", player, f"You must choose exactly one player to poison (you chose {len(player_choice)}). Your reasoning: {reasoning}")
-                    logger.error(f"Player {player.name} tried to poison {player_choice}. len(player_choice) != 1")
-                return
+        choice1: Player = self._player_dict[player_choice[0]]
+        choice2: Player = self._player_dict[player_choice[1]]
+        
+        # Check if this is a drunk or poisoned player
+        if (self._is_drunk_or_poisoned(player) or 
+            Townsfolk.FORTUNETELLER not in self._reminder_tokens or 
+            ReminderTokens.RED_HERRING not in self._reminder_tokens[Townsfolk.FORTUNETELLER]):
+            either_is_demon_or_red_herring = isinstance(choice1.character, Demon) or isinstance(choice2.character, Demon)
+            # The opposite of whatever the truth is
+            either_is_demon_or_red_herring = not either_is_demon_or_red_herring
+        else:
+            # Get the red herring player
+            red_herring = self._reminder_tokens[Townsfolk.FORTUNETELLER][ReminderTokens.RED_HERRING]
             
-            target_name = player_choice[0]
-            if target_name not in self._player_dict:
-                self._broadcast_info("Storyteller", player, f"You cannot poison '{target_name}' - player not found. Your reasoning: {reasoning}")
-                logger.error(f"Player {player.name} tried to poison '{target_name}' but they are not in the game.")
-                return
-            
-            # Remove the poison from any other player
-            for player_list in self._drunk_and_poisoned.values():
-                if player in player_list:
-                    player_list.remove(player)
+            # Check if either chosen player is a Demon or the red herring
+            either_is_demon_or_red_herring = (
+                Demon in self._get_player_roles(choice1) or choice1 is red_herring or
+                Demon in self._get_player_roles(choice2) or choice2 is red_herring
+            )
+        
+        if either_is_demon_or_red_herring:
+            info_msg = f"Yes, one of {choice1.name} and {choice2.name} is the Demon. Your reasoning: {reasoning}"
+            self._broadcast_info("Storyteller", player, info_msg, EventType.FORTUNETELLER_POWER,
+                                metadata={
+                                    "player_name": player.name,
+                                    "choices": [choice1.name, choice2.name],
+                                    "result": "yes",
+                                    "private_reasoning": reasoning,
+                                    "thinking": thinking
+                                })
+        else:
+            info_msg = f"No, neither {choice1.name} nor {choice2.name} is the Demon. Your reasoning: {reasoning}"
+            self._broadcast_info("Storyteller", player, info_msg, EventType.FORTUNETELLER_POWER,
+                                metadata={
+                                    "player_name": player.name,
+                                    "choices": [choice1.name, choice2.name],
+                                    "result": "no",
+                                    "private_reasoning": reasoning,
+                                    "thinking": thinking
+                                })
 
-            choice: Player = self._player_dict[target_name]
-            self._drunk_and_poisoned[choice].append(player)
-            
-            self._broadcast_info("Storyteller", player, f"You have poisoned {choice.name} for the night and next day. Your reasoning: {reasoning}", EventType.POISONER_POWER,
-                                metadata={"player_name": player.name, "target": choice.name, "private_reasoning": reasoning, "thinking": thinking})
-        except Exception as e:
-            logger.error(f"Error in poisoner power for {player.name}: {str(e)}")
-            self._broadcast_info("Storyteller", player, f"Something went wrong with your poisoning attempt. Your reasoning: {reasoning}")
+    def _poisoner_power(self, player: Player, night_start_game_state: PublicGameState) -> None:
+        player_choice, reasoning, thinking = self._get_night_player_choice_with_retries(player, night_start_game_state, POISONER_PROMPT, EventType.POISONER_POWER, 1)
+        
+        if not player_choice:
+            logger.info(f"Player {player.name} (Poisoner) chose no one to poison")
+            return
+        
+        # Remove the poison from any other player
+        for player_list in self._drunk_and_poisoned.values():
+            if player in player_list:
+                player_list.remove(player)
+
+        choice: Player = self._player_dict[player_choice[0]]
+        self._drunk_and_poisoned[choice].append(player)
+        
+        self._broadcast_info("Storyteller", player, f"You have poisoned {choice.name} for the night and next day. Your reasoning: {reasoning}", EventType.POISONER_POWER,
+                            metadata={"player_name": player.name, "target": choice.name, "private_reasoning": reasoning, "thinking": thinking})
 
     def _spy_power(self, player: Player) -> None:
         # The Spy sees the complete game state (the "Grimoire")
@@ -757,83 +769,62 @@ class Game:
                             metadata={"player_name": player.name, "grimoire_info": grimoire_info})
 
     def _monk_power(self, player: Player, night_start_game_state: PublicGameState) -> None:
-        player_choice, reasoning, thinking = player.night_player_choice(night_start_game_state, MONK_PROMPT)
+        player_choice, reasoning, thinking = self._get_night_player_choice_with_retries(player, night_start_game_state, MONK_PROMPT, EventType.MONK_POWER, 1)
         
-        try:
-            if len(player_choice) != 1:
-                raise ValueError("Monk can only choose one player")
-            
-            choice: Player = self._player_dict[player_choice[0]]
-            self._reminder_tokens[Townsfolk.MONK][ReminderTokens.MONK_PROTECTED] = choice
-            self._broadcast_info("Storyteller", player, f"You have protected {choice.name} from the Demon tonight. Your reasoning: {reasoning}", EventType.MONK_POWER,
-                                metadata={"player_name": player.name, "target": choice.name, "private_reasoning": reasoning, "thinking": thinking})
-        except KeyError:
-            logger.error(f"Player {player.name} tried to protect {player_choice[0]} but they are not in the game.")
-        except ValueError:
-            logger.error(f"Player {player.name} tried to protect {player_choice}. len(player_choice) != 1")
+        if not player_choice:
+            return
+        
+        choice: Player = self._player_dict[player_choice[0]]
+        self._reminder_tokens[Townsfolk.MONK][ReminderTokens.MONK_PROTECTED] = choice
+        self._broadcast_info("Storyteller", player, f"You have protected {choice.name} from the Demon tonight. Your reasoning: {reasoning}", EventType.MONK_POWER,
+                            metadata={"player_name": player.name, "target": choice.name, "private_reasoning": reasoning, "thinking": thinking})
 
     def _imp_power(self, player: Player, night_start_game_state: PublicGameState) -> None:
-        player_choice, reasoning, thinking = player.night_player_choice(night_start_game_state, IMP_PROMPT)
+        player_choice, reasoning, thinking = self._get_night_player_choice_with_retries(player, night_start_game_state, IMP_PROMPT, EventType.IMP_POWER, 1)
         
-        try:
-            if not player_choice or len(player_choice) != 1:
-                if not player_choice:
-                    self._broadcast_info("Storyteller", player, f"You chose no one to kill tonight. Your reasoning: {reasoning}")
-                    logger.info(f"Player {player.name} (Imp) chose no one to kill")
-                else:
-                    self._broadcast_info("Storyteller", player, f"You must choose exactly one player to kill (you chose {len(player_choice)}). Your reasoning: {reasoning}")
-                    logger.error(f"Player {player.name} tried to kill {player_choice}. len(player_choice) != 1")
-                return
-            
-            target_name = player_choice[0]
-            if target_name not in self._player_dict:
-                self._broadcast_info("Storyteller", player, f"You cannot kill '{target_name}' - player not found. Your reasoning: {reasoning}")
-                logger.error(f"Player {player.name} tried to kill '{target_name}' but they are not in the game.")
-                return
-            
-            choice = self._player_dict[target_name]
+        if not player_choice:
+            logger.info(f"Player {player.name} (Imp) chose no one to kill")
+            return
+        
+        choice = self._player_dict[player_choice[0]]
 
-            # Check for Mayor redirecting the kill
-            if (choice.character == Townsfolk.MAYOR and choice.alive
-                and not self._is_drunk_or_poisoned(choice) and not self._mayor_kill_deflected):
-                # The order we look for alternative targets to deflect the kill to
-                alternative_choices = [Outsider.BUTLER, Townsfolk.WASHERWOMAN, Townsfolk.LIBRARIAN, Townsfolk.INVESTIGATOR, Townsfolk.CHEF, \
-                                       Outsider.RECLUSE, Townsfolk.RAVENKEEPER, Townsfolk.MONK, Townsfolk.VIRGIN, Townsfolk.SOLDIER]
-                for character in alternative_choices:
-                    if character in self._character_dict and self._character_dict[character].alive:
-                        choice = self._character_dict[character]
-                        self._mayor_kill_deflected = True
-                        break
+        # Check for Mayor redirecting the kill
+        if (choice.character == Townsfolk.MAYOR and choice.alive
+            and not self._is_drunk_or_poisoned(choice) and not self._mayor_kill_deflected):
+            # The order we look for alternative targets to deflect the kill to
+            alternative_choices = [Outsider.BUTLER, Townsfolk.WASHERWOMAN, Townsfolk.LIBRARIAN, Townsfolk.INVESTIGATOR, Townsfolk.CHEF, \
+                                   Outsider.RECLUSE, Townsfolk.RAVENKEEPER, Townsfolk.MONK, Townsfolk.VIRGIN, Townsfolk.SOLDIER]
+            for character in alternative_choices:
+                if character in self._character_dict and self._character_dict[character].alive:
+                    choice = self._character_dict[character]
+                    self._mayor_kill_deflected = True
+                    break
 
-            self._reminder_tokens[Demon.IMP][ReminderTokens.IMP_KILLED] = choice
+        self._reminder_tokens[Demon.IMP][ReminderTokens.IMP_KILLED] = choice
 
-            if not self._safe_from_demon(choice) and not self._is_drunk_or_poisoned(player):
-                self._kill_player(choice, False, killed_by_demon=True)
-                self._broadcast_info("Storyteller", player, f"You have chosen to kill {choice.name} tonight. Your reasoning: {reasoning}", EventType.IMP_POWER,
-                                    metadata={"player_name": player.name, "target": choice.name, "success": True, "private_reasoning": reasoning, "thinking": thinking})
-                # If the Imp chose to kill themself, pick a minion to become the new Imp
-                if player.name == choice:
-                    # Pick a minion to become the new Imp
-                    minions = [p for p in self._players if isinstance(p.character, Minion)]
-                    if minions:
-                        new_imp = random.choice(minions)
-                        old_character = self._change_character(new_imp, Demon.IMP)
-                        self._broadcast_info("Storyteller", new_imp, f"The Imp {player.name} chose to kill themself and you are now the new Imp.", EventType.IMP_TRANSFORM,
-                                    metadata={
-                                        "player_name": player.name, 
-                                        "new_imp": new_imp.name, 
-                                        "old_character": old_character.value,
-                                        "new_character": new_imp.character.value,
-                                        "private_reasoning": reasoning,
-                                        "thinking": thinking
-                                    })
-            else:
-                self._broadcast_info("Storyteller", player, f"You tried t o kill {choice.name} but they did not die. Your reasoning: {reasoning}", EventType.IMP_POWER,
-                                    metadata={"player_name": player.name, "target": choice.name, "success": False, "reason": "protected", "private_reasoning": reasoning, "thinking": thinking})
-
-        except Exception as e:
-            logger.error(f"Error in imp power for {player.name}: {str(e)}")
-            self._broadcast_info("Storyteller", player, f"Something went wrong with your killing attempt. Your reasoning: {reasoning}")
+        if not self._safe_from_demon(choice) and not self._is_drunk_or_poisoned(player):
+            self._kill_player(choice, False, killed_by_demon=True)
+            self._broadcast_info("Storyteller", player, f"You have chosen to kill {choice.name} tonight. Your reasoning: {reasoning}", EventType.IMP_POWER,
+                                metadata={"player_name": player.name, "target": choice.name, "success": True, "private_reasoning": reasoning, "thinking": thinking})
+            # If the Imp chose to kill themself, pick a minion to become the new Imp
+            if player.name == choice.name:
+                # Pick a minion to become the new Imp
+                minions = [p for p in self._players if isinstance(p.character, Minion)]
+                if minions:
+                    new_imp = random.choice(minions)
+                    old_character = self._change_character(new_imp, Demon.IMP)
+                    self._broadcast_info("Storyteller", new_imp, f"The Imp {player.name} chose to kill themself and you are now the new Imp.", EventType.IMP_TRANSFORM,
+                                metadata={
+                                    "player_name": player.name, 
+                                    "new_imp": new_imp.name, 
+                                    "old_character": old_character.value,
+                                    "new_character": new_imp.character.value,
+                                    "private_reasoning": reasoning,
+                                    "thinking": thinking
+                                })
+        else:
+            self._broadcast_info("Storyteller", player, f"You tried to kill {choice.name} but they did not die. Your reasoning: {reasoning}", EventType.IMP_POWER,
+                                metadata={"player_name": player.name, "target": choice.name, "success": False, "reason": "protected", "private_reasoning": reasoning, "thinking": thinking})
 
     def _ravenkeeper_power(self, player: Player, night_start_game_state: PublicGameState) -> None:
         # Only allow Ravenkeeper to use power if they've died and been marked as woken
@@ -842,38 +833,32 @@ class Game:
             self._reminder_tokens[Townsfolk.RAVENKEEPER][ReminderTokens.RAVENKEEPER_WOKEN] is not player):
             return
         
-        player_choice, reasoning, thinking = player.night_player_choice(night_start_game_state, RAVENKEEPER_PROMPT)
+        player_choice, reasoning, thinking = self._get_night_player_choice_with_retries(player, night_start_game_state, RAVENKEEPER_PROMPT, EventType.RAVENKEEPER_POWER, 1)
         
-        try:
-            if len(player_choice) != 1:
-                raise ValueError("Ravenkeeper must choose exactly 1 player")
-            
-            choice: Player = self._player_dict[player_choice[0]]
-            learned_character = self._get_player_character(choice)
-            
-            # If the Ravenkeeper was drunk or poisoned when they died, give false information
-            if self._is_drunk_or_poisoned(player):
-                # Choose a random character from the script that isn't the actual character
-                all_characters = self._script.townsfolk + self._script.outsiders + self._script.minions + self._script.demons
-                other_characters = [char for char in all_characters if char != choice.character]
-                learned_character = random.choice(other_characters)
-            
-            self._broadcast_info("Storyteller", player, f"{choice.name} is the {learned_character.value}. Your reasoning: {reasoning}", EventType.RAVENKEEPER_POWER,
-                                metadata={
-                                    "player_name": player.name,
-                                    "target": choice.name,
-                                    "learned_character": learned_character.value,
-                                    "private_reasoning": reasoning,
-                                    "thinking": thinking
-                                })
-            
-            # Clear the reminder token after use
-            del self._reminder_tokens[Townsfolk.RAVENKEEPER][ReminderTokens.RAVENKEEPER_WOKEN]
-            
-        except KeyError:
-            logger.error(f"Player {player.name} tried to learn about {player_choice[0]} but they are not in the game.")
-        except ValueError as e:
-            logger.error(f"Player {player.name} made invalid choice for Ravenkeeper: {player_choice}. {str(e)}")
+        if not player_choice:
+            return
+        
+        choice: Player = self._player_dict[player_choice[0]]
+        learned_character = self._get_player_character(choice)
+        
+        # If the Ravenkeeper was drunk or poisoned when they died, give false information
+        if self._is_drunk_or_poisoned(player):
+            # Choose a random character from the script that isn't the actual character
+            all_characters = self._script.townsfolk + self._script.outsiders + self._script.minions + self._script.demons
+            other_characters = [char for char in all_characters if char != choice.character]
+            learned_character = random.choice(other_characters)
+        
+        self._broadcast_info("Storyteller", player, f"{choice.name} is the {learned_character.value}. Your reasoning: {reasoning}", EventType.RAVENKEEPER_POWER,
+                            metadata={
+                                "player_name": player.name,
+                                "target": choice.name,
+                                "learned_character": learned_character.value,
+                                "private_reasoning": reasoning,
+                                "thinking": thinking
+                            })
+        
+        # Clear the reminder token after use
+        del self._reminder_tokens[Townsfolk.RAVENKEEPER][ReminderTokens.RAVENKEEPER_WOKEN]
 
     def _undertaker_power(self, player: Player) -> None:
         # Check if there was an execution yesterday
@@ -904,28 +889,18 @@ class Game:
         del self._reminder_tokens[Townsfolk.UNDERTAKER][ReminderTokens.UNDERTAKER_EXECUTED]
 
     def _butler_power(self, player: Player, night_start_game_state: PublicGameState) -> None:
-        player_choice, reasoning, thinking = player.night_player_choice(night_start_game_state, BUTLER_PROMPT)
+        player_choice, reasoning, thinking = self._get_night_player_choice_with_retries(player, night_start_game_state, BUTLER_PROMPT, EventType.BUTLER_POWER, 1)
         
-        try:
-            if len(player_choice) != 1:
-                raise ValueError("Butler must choose exactly 1 player")
-            
-            choice: Player = self._player_dict[player_choice[0]]
-            
-            # Butler cannot choose themselves
-            if choice == player:
-                raise ValueError("Butler cannot choose themselves")
-            
-            # Set reminder token for the Butler's master
-            self._reminder_tokens[Outsider.BUTLER][ReminderTokens.BUTLER_MASTER] = choice
-            
-            self._broadcast_info("Storyteller", player, f"You have chosen {choice.name} as your master. Tomorrow, you may only vote if they are voting too. Your reasoning: {reasoning}", EventType.BUTLER_POWER,
-                                metadata={"player_name": player.name, "master": choice.name, "private_reasoning": reasoning, "thinking": thinking})
-            
-        except KeyError:
-            logger.error(f"Player {player.name} tried to choose {player_choice[0]} but they are not in the game.")
-        except ValueError as e:
-            logger.error(f"Player {player.name} made invalid choice for Butler: {player_choice}. {str(e)}")
+        if not player_choice:
+            return
+        
+        choice: Player = self._player_dict[player_choice[0]]
+        
+        # Set reminder token for the Butler's master
+        self._reminder_tokens[Outsider.BUTLER][ReminderTokens.BUTLER_MASTER] = choice
+        
+        self._broadcast_info("Storyteller", player, f"You have chosen {choice.name} as your master. Tomorrow, you may only vote if they are voting too. Your reasoning: {reasoning}", EventType.BUTLER_POWER,
+                            metadata={"player_name": player.name, "master": choice.name, "private_reasoning": reasoning, "thinking": thinking})
 
     def _check_mayor_win_condition(self) -> bool:
         """
@@ -1027,7 +1002,18 @@ class Game:
                 if drunk.drunk_character == character and drunk.alive:
                     return drunk
             
-            if player is None or not player.alive:
+            if player is None:
+                return None
+                
+            # Special case for Ravenkeeper: allow dead Ravenkeeper to use their power if they have the token
+            if (character == Townsfolk.RAVENKEEPER and not player.alive and
+                Townsfolk.RAVENKEEPER in self._reminder_tokens and
+                ReminderTokens.RAVENKEEPER_WOKEN in self._reminder_tokens[Townsfolk.RAVENKEEPER] and
+                self._reminder_tokens[Townsfolk.RAVENKEEPER][ReminderTokens.RAVENKEEPER_WOKEN] is player):
+                return player
+                
+            # For other characters, they must be alive to use their power
+            if not player.alive:
                 return None
 
             return player
@@ -1368,9 +1354,10 @@ class Game:
                 
                 remaining_retries = 2
                 finsihed_action = False
+                execption = None
                 # We sometimes get invalid action parameters, so we retry a few times if that happens
                 while not finsihed_action and remaining_retries > 0:
-                    action: DayAction | None = player.day_action(self._get_public_game_state(), self._nominations_open, remaining_rounds)
+                    action: DayAction | None = player.day_action(self._get_public_game_state(), self._nominations_open, remaining_rounds, execption)
 
                     if isinstance(action, NoAction):
                         consecutive_passes += 1
@@ -1400,6 +1387,13 @@ class Game:
                             # Validate nominee
                             if action.nominee not in self._player_dict:
                                 raise Exception(f"Invalid nominee: {action.nominee} - not found in player dictionary.")
+                            # If this player is not nominatable
+                            if action.nominee not in {p.name for p in self._players if not p.nominated_today}:
+                                raise Exception(f"Invalid nominee: {action.nominee} - not in nominatable players.")
+                            # If this player is not alive
+                            if not self._player_dict[action.nominee].alive:
+                                raise Exception(f"Invalid nominee: {action.nominee} - not alive.")
+                            
                             # Valid nomination - process it
                             if self._run_nomination(player, action):
                                 return None  # End the day if someone died from the Virgin's power
@@ -1427,18 +1421,19 @@ class Game:
                             )
                     except Exception as e:
                         logger.error(f"Error in day action: remaining_retries: {remaining_retries}, {e}")
+                        print(f"Error in day action: player: {player.name}, remaining_retries: {remaining_retries}, {e}")
+                        execption = e
                         remaining_retries -= 1
                         self.event_tracker.add_event(
                             event_type=EventType.ERROR,
-                            description=f"Error in day action: {e}",
+                            description=f"Error in day action: Player: {player.name}, Error: {e}",
                             round_number=self._round_number,
                             phase=self._current_phase.value,
                             participants=[player.name],
                         )
-                        return None
+                        continue
                     else:
                         finsihed_action = True
-
             if end_day_early:
                 break
 
@@ -1491,19 +1486,20 @@ class Game:
     
     def run_game(self, max_rounds=6) -> Alignment | None:
         # Track game start
-        self.event_tracker.add_event(
-            event_type=EventType.GAME_START,
-            description=f"Blood on the Clocktower game started with {len(self._players)} players",
-            round_number=self._round_number,
-            phase=self._current_phase.value,
-            participants=[p.name for p in self._players],
-            game_state=self._get_enhanced_game_state_for_logging(),
-            metadata={
-                "max_rounds": max_rounds, 
-                "players": [p.name for p in self._players],
-                "player_count": len(self._players)
-            }
-        )
+        if self._round_number == 1:
+            self.event_tracker.add_event(
+                event_type=EventType.GAME_START,
+                description=f"Blood on the Clocktower game started with {len(self._players)} players",
+                round_number=self._round_number,
+                phase=self._current_phase.value,
+                participants=[p.name for p in self._players],
+                game_state=self._get_enhanced_game_state_for_logging(),
+                metadata={
+                    "max_rounds": max_rounds, 
+                    "players": [p.name for p in self._players],
+                    "player_count": len(self._players)
+                }
+            )
         
         logger.info("Initial game state:")
         self._print_status_summary()
@@ -1521,6 +1517,10 @@ class Game:
                 self._current_phase = Phase.NIGHT
             
             while self._round_number <= max_rounds:
+
+                # Save game state here
+                self._save_checkpoint("night")
+                
                 # Only add night phase change event if we're not already in night phase
                 if self._current_phase != Phase.NIGHT:
                     self.event_tracker.add_event(
@@ -1564,6 +1564,9 @@ class Game:
                     phase="DAY",
                     game_state=self._get_enhanced_game_state_for_logging()
                 )
+                
+                # Save a checkpoint at the beginning of each day phase
+                self._save_checkpoint("day")
                 
                 game_over = self._run_day_phase()
                 if game_over:
@@ -1611,3 +1614,198 @@ class Game:
                 "game_statistics": game_stats
             }
         )
+
+    def _get_night_player_choice_with_retries(self, player: Player, night_start_game_state: PublicGameState, prompt: str, event_type: EventType, expected_targets: int) -> tuple[list[str], str, str]:
+        """
+        Helper function to get a player's night choices with retry logic.
+        Returns the validated player_choice, reasoning, and thinking.
+        
+        Args:
+            player: The player making the choice
+            night_start_game_state: The game state at the start of the night
+            prompt: The prompt for the player to choose
+            event_type: The event type for the player's choice
+            expected_targets: The expected number of targets for the player's choice
+        """
+        remaining_retries = 2
+        player_choice: list[str] = []
+        reasoning = ""
+        thinking = ""
+        
+        while remaining_retries > 0:
+            try:
+                player_choice, reasoning, thinking = player.night_player_choice(night_start_game_state, prompt)
+                
+                # Validate the choice
+                if len(player_choice) != expected_targets or not player_choice:
+                    if not player_choice:
+                        raise ValueError(f"You must choose {expected_targets} player(s). You chose none.")
+                    else:
+                        raise ValueError(f"You must choose exactly {expected_targets} player(s) (you chose {len(player_choice)}). player_choice: {player_choice}")
+                
+                # Validate all player names exist
+                for target_name in player_choice:
+                    if target_name not in self._player_dict:
+                        raise ValueError(f"Invalid player: {target_name} - player not found.")
+                
+                # Additional validation for Butler (cannot choose self)
+                # This special case can be detected by the action_info configuration
+                if event_type == EventType.BUTLER_POWER and player.name in player_choice:
+                    raise ValueError("You cannot choose yourself as your master.")
+
+            except ValueError as e:
+                logger.error(f"Invalid night action choice for {player.name}: {e}. Remaining retries: {remaining_retries}")
+                print(f"Invalid night action choice for {player.name}: {e}. Remaining retries: {remaining_retries}")
+                remaining_retries -= 1
+                if remaining_retries == 0:
+                    # Last failure, log to event tracker but don't broadcast
+                    self.event_tracker.add_event(
+                        event_type=EventType.ERROR,
+                        description=f"Error in night action for {player.name}: {e}",
+                        round_number=self._round_number,
+                        phase=self._current_phase.value,
+                        participants=[player.name],
+                    )
+            except Exception as e:
+                # For unexpected errors, log but don't broadcast
+                logger.error(f"Unexpected error in night action: {e}. Remaining retries: {remaining_retries}")
+                print(f"Unexpected error in night action: {e}. Remaining retries: {remaining_retries}")
+                remaining_retries -= 1
+                if remaining_retries == 0:
+                    self.event_tracker.add_event(
+                        event_type=EventType.ERROR,
+                        description=f"Unexpected error in night action for {player.name}: {e}",
+                        round_number=self._round_number,
+                        phase=self._current_phase.value,
+                        participants=[player.name],
+                    )
+            else:
+                break
+        
+        return player_choice, reasoning, thinking
+
+    def _save_checkpoint(self, phase_description: str):
+        """Save a checkpoint of the current game state in the event metadata"""
+        try:
+            import pickle
+            import base64
+            
+            # Temporarily store and remove the event tracker since it contains file handles
+            temp_event_tracker = self.event_tracker
+            self.event_tracker = None
+            
+            try:
+                # Pickle the game without the event tracker
+                pickled_game = pickle.dumps(self)
+                
+                # Encode the binary pickle data as base64 for JSON compatibility
+                encoded_game = base64.b64encode(pickled_game).decode('utf-8')
+                
+                # Log the checkpoint event with the encoded game state
+                temp_event_tracker.add_event(
+                    event_type=EventType.CHECKPOINT,
+                    description=f"Game checkpoint saved for round {self._round_number}, {phase_description}",
+                    round_number=self._round_number,
+                    phase=self._current_phase.value,
+                    participants=[],
+                    game_state=self._get_enhanced_game_state_for_logging(),
+                    metadata={
+                        "checkpoint_type": phase_description,
+                        "round": self._round_number,
+                        "phase": self._current_phase.value,
+                        "timestamp": datetime.now().isoformat(),
+                        "save_game": encoded_game,  # Include the encoded game state directly in metadata
+                        "format": "pickle_base64"  # Mark the format so we know how to decode it
+                    }
+                )
+                logger.info(f"Game checkpoint saved in event log for round {self._round_number}, {phase_description}")
+                return True
+            finally:
+                # Restore the event tracker
+                self.event_tracker = temp_event_tracker
+                
+        except Exception as e:
+            logger.error(f"Failed to save checkpoint: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+    @staticmethod
+    def load_from_checkpoint(log_path: str, checkpoint_index: int = -1):
+        """
+        Load a game from a checkpoint in a log file
+        
+        Args:
+            log_path: Path to the log file
+            checkpoint_index: Index of the checkpoint to load (-1 for most recent)
+            
+        Returns:
+            The loaded Game object or None if loading failed
+        """
+        try:
+            # Import necessary modules
+            import json
+            import base64
+            import pickle
+            
+            # Read the log file and find checkpoint events
+            with open(log_path, 'r') as f:
+                log_lines = f.readlines()
+            
+            # Parse each line as JSON and find CHECKPOINT events
+            checkpoint_events = []
+            for line in log_lines:
+                try:
+                    event = json.loads(line)
+                    if event.get("event_type") == "checkpoint" and "metadata" in event and "save_game" in event["metadata"]:
+                        checkpoint_events.append(event)
+                except json.JSONDecodeError:
+                    continue
+            
+            if not checkpoint_events:
+                logger.error(f"No checkpoint events found in log file: {log_path}")
+                return None
+            
+            # Get the specified checkpoint (default to most recent)
+            if checkpoint_index < 0:
+                checkpoint_index = len(checkpoint_events) + checkpoint_index
+            
+            if checkpoint_index < 0 or checkpoint_index >= len(checkpoint_events):
+                logger.error(f"Invalid checkpoint index: {checkpoint_index}, valid range: 0-{len(checkpoint_events)-1}")
+                return None
+            
+            checkpoint = checkpoint_events[checkpoint_index]
+            metadata = checkpoint["metadata"]
+            
+            # Check the format and decode appropriately
+            format_type = metadata.get("format", "pickle_base64")
+            encoded_data = metadata["save_game"]
+            
+            # Decode the base64-encoded data
+            if format_type == "pickle_base64":
+                # Decode the base64-encoded pickle data
+                pickled_game = base64.b64decode(encoded_data)
+                
+                # Deserialize the game object
+                game = pickle.loads(pickled_game)
+                
+                # Re-initialize the event tracker
+                try:
+                    from game_events import GameEventTracker
+                except ModuleNotFoundError:
+                    from src.game_events import GameEventTracker
+                game.event_tracker = GameEventTracker()
+                
+                logger.info(f"Game loaded from checkpoint in log file: {log_path}")
+                logger.info(f"Round: {game._round_number}, Phase: {game._current_phase.value}")
+                
+                return game
+            else:
+                logger.error(f"Unsupported checkpoint format: {format_type}")
+                return None
+        
+        except Exception as e:
+            logger.error(f"Failed to load game from checkpoint: {e}")
+            import traceback
+            traceback.print_exc()
+            return None

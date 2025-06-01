@@ -1,5 +1,12 @@
 from dataclasses import dataclass
-from characters import Character, Townsfolk, Outsider, Minion, Demon
+import sys
+
+# Use different import paths depending on how the file is being run
+try:
+    from characters import Character, Townsfolk, Outsider, Minion, Demon
+except ModuleNotFoundError:
+    # Fall back to prefixed import when run from outside src directory
+    from src.characters import Character, Townsfolk, Outsider, Minion, Demon
 
 @dataclass
 class Script:
@@ -17,8 +24,8 @@ The following is the complete list of all characters that can be in the game.
 • Washerwoman: Starts knowing that 1 of 2 players is a particular Townsfolk
 • Librarian: Starts knowing that 1 of 2 players is a particular Outsider (or that zero are in play)
 • Investigator: Starts knowing that 1 of 2 players is a particular Minion
-• Chef: Starts knowing how many adjacent pairs of Evil players there are. (If three evil players are adjacent in a line, there are two pairs)
-• Empath: Each night, learns how many of their 2 alive neighbors are Evil
+• Chef: Starts knowing how many adjacent pairs of Evil players there are. 0 means evil players are not sitting next to each other, 1 means there is one pair, and 2 means there are two pairs.
+• Empath: Each night, learns how many of their 2 alive neighbors are Evil. They will be told a 0 if neither neighbor is Evil, a 1 if one neighbor is Evil, and a 2 if both neighbors are Evil.
 • Fortune Teller: Each night, chooses 2 players and learns if either is a Demon. There is a good player who registers as a Demon.
 • Undertaker: Each night (except the first), learns which character died by execution that day (players killed by the Demon are not considered executed)
 • Monk: Each night (except the first), chooses a player to protect from the Demon's attack
@@ -37,7 +44,7 @@ The following is the complete list of all characters that can be in the game.
 ## Minions (Evil)
 • Poisoner: Each night they choose a player to poison for that night and the next day
 • Spy: Each night, sees the Grimoire (contains complete information about the game state); might register as Good and as a Townsfolk or Outsider
-• Scarlet_Woman: If 5+ players are alive and the Demon dies, becomes the Demon
+• Scarlet_Woman: If 5+ players are alive and the Demon dies, becomes the Demon and the game continues.
 • Baron: Adds two extra Outsiders to the game during setup. The player count stays the same and Townsfolk are removed to make room
 
 ## Demon (Evil)

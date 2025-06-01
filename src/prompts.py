@@ -8,7 +8,7 @@ The game is moderated by the Storyteller who is a neutral agent that will enforc
 ## Objectives
 The Good team wins if they execute the Demon.
 
-The Evil team wins if there are only 2 players left alive no matter what team they are on.
+The Evil team wins if there are only 2 players left alive no matter what team they are on. The evil team does NOT win if they only outnumber the Good team. For example, if there are 3 players alive and 2 are evil and 1 is good, the game continues because evil only wins if there are 2 players left alive.
 
 ## Gameplay
 The game is played in rounds. Each round has a night phase and then a day phase. The game continues until either team wins.
@@ -18,7 +18,7 @@ During the day players can send messages to each other to persuade, strategize, 
 During the night the Storyteller will secretly give information to players based on their character's ability or allow them to secretly use their ability. All information at night is secret and only the player receiving the information or using their ability knows about it.
 
 ## Nomination for Execution
-Towards the end of the day the Storyteller will allow players to nominate each other for execution. Each living player can only nominate one person per day and each person may only be nominated once per day. You can nominate any player including yourself or any other living or ghost player.
+Towards the end of the day the Storyteller will allow players to nominate each other for execution. Each living player can only nominate one person per day and each person may only be nominated once per day. You can nominate any player including yourself or any other living or ghost player. There does not have to be an execution every day.
 
 During a nomination each player will vote starting with the player who is being nominated and proceeding left to right until all players have voted. Players can vote yes or no. When each player votes, they first get to see the votes of the players who voted before them. 
 
@@ -30,13 +30,15 @@ The alignment of a player is the team they are on. A player can be on the Good t
 ## Characters
 Each player has a character. Each character has an ability. A player's character is seperate from their alignment. The moment a player dies, or becomes poisoned or drunk, their character's ability stops affecting the game. No one's character will be confirmed or denied by the Storyteller. For example, if a player uses the Slayer power you will be either told the target dies or nothing happened. If nothing happens the player who used the power may or may not be the real Slayer.
 
+Some characters, like the Undertaker, Empath, Ravenkeeper, and Fortuneteller, only learn information at night and cannot share that information with anyone until the next day. Some characters, like the Investigator, Librarian, Chef, and Washerwoman, only learn information on the first night, and not on subsequent nights.
+
 ## Roles
 The Good team is made up of Townsfolk and Outsiders. Townsfolk are Good players who have an ability that is helpful to the Good team. Outsiders are Good players who have an ability that is harmful to the Good team.
 
 The Evil team is made up of one Demon and one to three Minions. The Demon is the most important Evil player and the player that the Good team is trying to kill. Minions are also Evil players who have an ability that is helpful to the Evil team. At the start of the game, the Demon is secretly told three good players that are not in play so the evil team can bluff as those roles.
 
 ## Ghost Players
-Ghost players are still in the game and can still talk to other players, but they no longer have their character's ability, they cannot nominate players for execution, and they only get one vote for the rest of the game.
+Ghost players are still in the game and can still talk to other players, but they no longer have their character's ability, they cannot nominate players for execution, and they only get one vote for the rest of the game. You do not learn what character players are when they die or what team they are on.
 
 ## Being Poisoned and Drunk
 Poisoned and Drunk are status effects that can be applied to players. They function the exact same way and a player will not know if they are Poisoned or Drunk. If a player is Poisoned or Drunk their character's ability will not work and any information that they receive from the Storyteller may be false. The Drunk is an Outsider who is told that they are one of the Townsfolk characters.

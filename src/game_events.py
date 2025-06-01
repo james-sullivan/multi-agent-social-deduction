@@ -33,6 +33,8 @@ class EventType(Enum):
     DEATH_ANNOUNCEMENT = "death_announcement"
     EARLY_DAY_END = "early_day_end"
     ERROR = "error"
+    GAME_SAVE = "game_save"  # New event type for game saves
+    CHECKPOINT = "checkpoint"  # Automatic checkpointing at key game phases
 
     # Specific character power events
     WASHERWOMAN_POWER = "washerwoman_power"

@@ -69,14 +69,14 @@ def create_game(config, debug=False):
     characters = [
         Demon.IMP,
         Minion.SPY,
-        Minion.BARON,
-        Townsfolk.LIBRARIAN,
+        Minion.POISONER,
+        Townsfolk.RAVENKEEPER,
         Townsfolk.FORTUNETELLER,
         Townsfolk.UNDERTAKER,
         Townsfolk.MAYOR,
         Townsfolk.CHEF,
-        Outsider.SAINT,
-        Outsider.DRUNK,
+        Townsfolk.SLAYER,
+        Townsfolk.EMPATH,
     ]
 
     characters = [
@@ -88,7 +88,7 @@ def create_game(config, debug=False):
         Townsfolk.UNDERTAKER,
         Townsfolk.MAYOR,
         Townsfolk.VIRGIN,
-        Townsfolk.MONK,
+        Townsfolk.FORTUNETELLER,
         Townsfolk.WASHERWOMAN
     ]
 
@@ -137,13 +137,15 @@ def create_game(config, debug=False):
 
     characters = [
         Demon.IMP,
+        Minion.POISONER,
         Minion.SCARLET_WOMAN,
-        Townsfolk.INVESTIGATOR,
+        Townsfolk.SLAYER,
         Townsfolk.MONK,
-        Townsfolk.WASHERWOMAN,
         Townsfolk.UNDERTAKER,
-        Townsfolk.RAVENKEEPER,
-        Outsider.DRUNK,
+        Townsfolk.MAYOR,
+        Townsfolk.VIRGIN,
+        Townsfolk.FORTUNETELLER,
+        Townsfolk.WASHERWOMAN
     ]
 
     outsider_count = sum(1 for char in characters if isinstance(char, Outsider))
@@ -190,7 +192,7 @@ def run_game(config_name="default", debug=False):
     game = create_game(config, debug=debug)
     
     # Run the game
-    max_rounds = config.get("max_rounds", 8)
+    max_rounds = 10
     result = game.run_game(max_rounds)
     
     if result == Alignment.GOOD:
