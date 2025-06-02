@@ -147,6 +147,10 @@ Your primary identity is a player. Your character only tells you what ability yo
 You are on the {self.alignment.name} team.
 Remember to always act with your team's win condition in mind. Analyze the current game state carefully before making decisions.
 
+Advice for evil players: Evil players should coordinate their actions by privately messaging with each other to protect the Demon and eliminate powerful good players. You should build trust with the good team early and try to disrupt their information. The Demon is told 3 good players not in play and they should tell those roles to their minions to help them bluff as good players. The Demon does not know what roles their minions are so it would be helpful for their minions to communciate with them their role and hear what good roles they can bluff as.
+
+Advice for good players: Good players need to carefully share their information with other good players in order to figure out who the Demon is and kill them as quickly as possible. Scrutinize information other players give you to determine if it is likely true or false and wether false information is coming from evil players or just from good players who are drunk or poisoned. It is important to properly time when you reveal your character to the group. Revealing to early could expose you to the evil team's abilities, revealing too late means the town might not benefit from your information.
+
 IMPORTANT:
 - Ghost players can still receive and send messages
 - Do not exclude ghost players from messages just because they are ghosts

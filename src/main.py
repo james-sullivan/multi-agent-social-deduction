@@ -137,14 +137,11 @@ def create_game(config, debug=False):
 
     characters = [
         Demon.IMP,
-        Minion.SPY,
         Minion.POISONER,
-        Townsfolk.RAVENKEEPER,
+        Townsfolk.WASHERWOMAN,
         Townsfolk.FORTUNETELLER,
         Townsfolk.UNDERTAKER,
         Townsfolk.MAYOR,
-        Townsfolk.CHEF,
-        Townsfolk.SLAYER,
         Townsfolk.EMPATH,
     ]
 
