@@ -1202,9 +1202,10 @@ class Game:
             self._reminder_tokens[Townsfolk.VIRGIN] = {ReminderTokens.VIRGIN_POWER_USED: nominee}
             if Townsfolk in self._get_player_roles(player) and not self._is_drunk_or_poisoned(nominee):            
                 self._kill_player(player)
+                self._chopping_block = None
                 self._broadcast_info(sender="Storyteller",
                                     recipients=self._all_players(), 
-                                    info=f"{player.name} has nominated {nominee.name} for execution. {player.name} has been executed and the day is over.",
+                                    info=f"{player.name} has nominated {nominee.name} for execution. {player.name} has been executed by the Virgin power and the day is over.",
                                     event_type=EventType.VIRGIN_POWER,
                                     metadata={"nominee": nominee.name, "nominator": player.name, "thinking": action.thinking})
                 return True
@@ -1356,7 +1357,7 @@ class Game:
                 finsihed_action = False
                 execption = None
                 # We sometimes get invalid action parameters, so we retry a few times if that happens
-                while not finsihed_action and remaining_retries > 0:
+                while not finsihed_action and remaining_retries >= 0:
                     action: DayAction | None = player.day_action(self._get_public_game_state(), self._nominations_open, remaining_rounds, execption)
 
                     if isinstance(action, NoAction):
@@ -1632,7 +1633,7 @@ class Game:
         reasoning = ""
         thinking = ""
         
-        while remaining_retries > 0:
+        while remaining_retries >= 0:
             try:
                 player_choice, reasoning, thinking = player.night_player_choice(night_start_game_state, prompt)
                 

@@ -137,15 +137,15 @@ def create_game(config, debug=False):
 
     characters = [
         Demon.IMP,
+        Minion.SPY,
         Minion.POISONER,
-        Minion.SCARLET_WOMAN,
-        Townsfolk.SLAYER,
-        Townsfolk.MONK,
+        Townsfolk.RAVENKEEPER,
+        Townsfolk.FORTUNETELLER,
         Townsfolk.UNDERTAKER,
         Townsfolk.MAYOR,
-        Townsfolk.VIRGIN,
-        Townsfolk.FORTUNETELLER,
-        Townsfolk.WASHERWOMAN
+        Townsfolk.CHEF,
+        Townsfolk.SLAYER,
+        Townsfolk.EMPATH,
     ]
 
     outsider_count = sum(1 for char in characters if isinstance(char, Outsider))
@@ -156,8 +156,8 @@ def create_game(config, debug=False):
         outsider_count -= 2
         townsfolk_count += 2
 
-    model = "claude-3-5-haiku-20241022"
-    #model = "claude-sonnet-4-20250514"
+    #model = "claude-3-5-haiku-20241022"
+    model = "claude-sonnet-4-20250514"
     #model = "claude-opus-4-20250514"
 
     if "haiku" in model:
