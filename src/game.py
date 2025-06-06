@@ -102,6 +102,7 @@ class Game:
         self._mayor_kill_deflected: bool = False
         self._script: Script = script
         self._model: str = model
+        self._previous_highest_tally: int = 0
         
         self._original_role_counts = {
             "townsfolk": townsfolk_count,
@@ -1242,6 +1243,7 @@ class Game:
         else:
             living_count = sum(1 for player in self._players if player.alive)
             required_to_nominate = living_count // 2 if living_count % 2 == 0 else living_count // 2 + 1
+            required_to_nominate = max(required_to_nominate, self._previous_highest_tally + 1)
             required_to_tie = None
 
         count = 0
@@ -1319,13 +1321,14 @@ class Game:
         # Add vote record to message and broadcast result
         message += f" Vote record: {format_vote_history(previous_votes)}"
         self._broadcast_info("Storyteller", self._all_players(), message, EventType.NOMINATION_RESULT, metadata=metadata)
-
+        self._previous_highest_tally = max(self._previous_highest_tally, count)
         return False
 
 
     def _run_day_phase(self) -> Alignment | None:
         self._current_phase = Phase.DAY
         self._nominations_open = False  # Close nominations at the start of each day
+        self._previous_highest_tally = 0
         self._clear_night_tokens()
         for player in self._players:
             player.start_of_day()

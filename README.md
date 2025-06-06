@@ -11,7 +11,6 @@ This project simulates Blood on the Clocktower games where AI agents take on dif
 - **Multi-Agent AI Gameplay**: AI players with distinct personalities and strategies
 - **Complete Role Implementation**: Full suite of Blood on the Clocktower characters including Townsfolk, Outsiders, Minions, and Demons
 - **Strategic Decision Making**: AI agents use reasoning, bluffing, and social deduction
-- **Game Visualization**: React-based web interface for viewing game progression
 - **Detailed Logging**: Comprehensive game logs with cost tracking for API usage
 - **Configurable Games**: Customizable player counts and character distributions
 
@@ -26,7 +25,6 @@ This project simulates Blood on the Clocktower games where AI agents take on dif
 │   ├── game_events.py     # Event tracking and game state changes
 │   ├── inference.py       # Claude API integration and cost tracking
 │   └── prompts.py         # Character-specific prompts for AI agents
-├── botc-visualizer/       # React web app for game visualization
 ├── config.yaml           # Game configuration settings
 └── requirements.txt       # Python dependencies
 ```
@@ -36,7 +34,6 @@ This project simulates Blood on the Clocktower games where AI agents take on dif
 ### Prerequisites
 
 - Python 3.12+
-- Node.js 18+ (for the visualizer)
 - Anthropic API key
 
 ### Installation
@@ -59,13 +56,6 @@ This project simulates Blood on the Clocktower games where AI agents take on dif
    cp .env.example .env
    # Edit .env and add your Anthropic API key:
    # ANTHROPIC_API_KEY=your_api_key_here
-   ```
-
-4. **Set up the visualizer (optional):**
-   ```bash
-   cd botc-visualizer
-   npm install
-   npm start
    ```
 
 ## Usage
@@ -164,3 +154,6 @@ Games generate comprehensive logs including:
 
 Logs are saved to `blood_on_the_clocktower.log` and `logs/` directory.
 
+# Visualizer
+
+Check out this interactive timeline website: https://james-sullivan.github.io/botc-visualizer/
